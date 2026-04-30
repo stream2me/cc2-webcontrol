@@ -11,8 +11,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, trace, warn};
 
 use super::commands::{Command, PendingRpcs};
-use super::models::{FullStatus, RpcResponse, METHOD_GET_AMS_INFO, METHOD_GET_FILE_LIST, METHOD_GET_FULL_STATUS, METHOD_STATUS_PUSH};
-use super::state::PrinterState;
+use super::models::{FullStatus, RpcResponse, METHOD_GET_AMS_INFO, METHOD_GET_FILE_LIST, METHOD_GET_FILE_THUMBNAIL, METHOD_GET_FULL_STATUS, METHOD_STATUS_PUSH};
+use super::state::{PrinterState, PrintState};
 use crate::error::PrinterError;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -123,6 +123,8 @@ impl MqttWsClient {
 
         let mut registered = false;
         let mut heartbeat = interval(Duration::from_secs(10));
+        let session_refresh = tokio::time::sleep(Duration::from_secs(8 * 60));
+        tokio::pin!(session_refresh);
 
         loop {
             tokio::select! {
@@ -133,6 +135,13 @@ impl MqttWsClient {
                         state_changed_tx.send(()).ok();
                         return Ok(());
                     }
+                }
+
+                _ = &mut session_refresh => {
+                    info!("[ws] session refresh – reconnecting");
+                    connected_tx.send(false).ok();
+                    state_changed_tx.send(()).ok();
+                    return Ok(());
                 }
 
                 _ = heartbeat.tick() => {
@@ -210,7 +219,7 @@ impl MqttWsClient {
                                                 }
                                             }
                                         } else {
-                                            Self::handle_publish(
+                                            if let Some(follow_up) = Self::handle_publish(
                                                 &topic,
                                                 &payload,
                                                 &api_status_topic,
@@ -219,7 +228,19 @@ impl MqttWsClient {
                                                 &state_changed_tx,
                                                 &pending_rpcs,
                                             )
-                                            .await;
+                                            .await {
+                                                let req = serde_json::json!({
+                                                    "id": id_seq,
+                                                    "method": follow_up["method"],
+                                                    "params": follow_up["params"],
+                                                });
+                                                id_seq += 1;
+                                                if let Ok(p) = serde_json::to_vec(&req) {
+                                                    if let Err(e) = mqtt.publish(&mut write, &api_request_topic, &p).await {
+                                                        warn!("[ws] thumb prefetch failed: {e}");
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                     WsPacket::PubAck => trace!("ws PUBACK"),
@@ -265,13 +286,13 @@ impl MqttWsClient {
         state: &Arc<RwLock<PrinterState>>,
         state_changed_tx: &broadcast::Sender<()>,
         pending_rpcs: &PendingRpcs,
-    ) {
+    ) -> Option<serde_json::Value> {
         if topic == api_status_topic {
-            let Ok(value) = serde_json::from_slice::<Value>(payload) else { return };
+            let Ok(value) = serde_json::from_slice::<Value>(payload) else { return None };
             let msg_type = value.get("type").and_then(|t| t.as_str());
             if msg_type == Some("PING") || msg_type == Some("PONG") {
                 trace!("ws heartbeat msg: {:?}", msg_type);
-                return;
+                return None;
             }
             if value.get("method").and_then(|m| m.as_u64()) == Some(METHOD_STATUS_PUSH as u64) {
                 if let Some(result) = value.get("result") {
@@ -281,18 +302,42 @@ impl MqttWsClient {
                 }
             }
         } else if topic == api_response_topic {
-            let Ok(resp) = serde_json::from_slice::<RpcResponse>(payload) else { return };
-            // resolve pending RPC
+            let Ok(resp) = serde_json::from_slice::<RpcResponse>(payload) else { return None };
+
             if resp.id > 0 {
                 if let Some(tx) = pending_rpcs.lock().await.remove(&resp.id) {
                     tx.send(resp.result.data.clone()).ok();
                 }
             }
+
             if resp.method == METHOD_GET_FULL_STATUS && resp.result.error_code == 0 {
                 if let Ok(status) = serde_json::from_value::<FullStatus>(resp.result.data.clone()) {
                     state.write().await.seed(status);
                     state_changed_tx.send(()).ok();
                     info!("[ws] full status snapshot loaded");
+
+                    let s = state.read().await;
+                    let filename = s.full.print_status.filename.clone();
+                    let is_active = matches!(s.print_state(), PrintState::Printing | PrintState::Paused);
+                    let needs_thumb = !filename.is_empty() && !s.thumbnail_cache.contains_key(&filename);
+                    drop(s);
+
+                    if is_active && needs_thumb {
+                        return Some(serde_json::json!({
+                            "method": METHOD_GET_FILE_THUMBNAIL,
+                            "params": { "storage_media": "local", "file_name": filename },
+                        }));
+                    }
+                }
+            } else if resp.method == METHOD_GET_FILE_THUMBNAIL {
+                let thumb = resp.result.data.get("thumbnail").and_then(|v| v.as_str()).unwrap_or("");
+                if !thumb.is_empty() {
+                    let filename = state.read().await.full.print_status.filename.clone();
+                    if !filename.is_empty() {
+                        state.write().await.thumbnail_cache.insert(filename.clone(), thumb.to_string());
+                        state_changed_tx.send(()).ok();
+                        info!("[ws] thumbnail cached for {filename}");
+                    }
                 }
             } else if resp.method == METHOD_GET_FILE_LIST && resp.result.error_code == 0 {
                 if let Some(arr) = resp.result.data.get("file_list").and_then(|v| v.as_array()) {
@@ -308,6 +353,7 @@ impl MqttWsClient {
                 }
             }
         }
+        None
     }
 }
 

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::time::UNIX_EPOCH;
 
@@ -48,6 +48,7 @@ pub struct PrinterState {
     /// event total mono
     pub events_total: u64,
     pub files: Vec<Value>,
+    pub thumbnail_cache: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +108,7 @@ impl PrinterState {
             events: Vec::with_capacity(100),
             events_total: 0,
             files: Vec::new(),
+            thumbnail_cache: HashMap::new(),
         }
     }
 

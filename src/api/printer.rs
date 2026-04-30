@@ -189,9 +189,28 @@ pub async fn get_thumbnail(
         return Err(AppError::Validation("filename is required".to_string()));
     }
     let storage = query.storage.as_deref().unwrap_or("local");
-    let manager = state.manager.lock().await;
-    let data = manager.get_file_thumbnail(storage, &query.filename).await?;
-    let thumbnail = data.get("thumbnail").and_then(|v| v.as_str()).unwrap_or("");
+
+    {
+        let ps = state.printer_state.read().await;
+        if let Some(cached) = ps.thumbnail_cache.get(&query.filename) {
+            return Ok(Json(serde_json::json!({
+                "thumbnail": cached,
+                "filename": query.filename,
+            })));
+        }
+    }
+
+    let thumbnail = {
+        let manager = state.manager.lock().await;
+        let data = manager.get_file_thumbnail(storage, &query.filename).await?;
+        data.get("thumbnail").and_then(|v| v.as_str()).unwrap_or("").to_string()
+    };
+
+    if !thumbnail.is_empty() {
+        state.printer_state.write().await
+            .thumbnail_cache.insert(query.filename.clone(), thumbnail.clone());
+    }
+
     Ok(Json(serde_json::json!({
         "thumbnail": thumbnail,
         "filename": query.filename,
