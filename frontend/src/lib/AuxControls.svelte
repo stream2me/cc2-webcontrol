@@ -20,12 +20,40 @@
     { val: 3, label: 'Ludicrous' },
   ];
 
+<<<<<<< Updated upstream
   function fanToPercent(speed: number): number { return Math.round((speed / 255) * 100); }
   function percentToFan(pct: number): number { return Math.round((pct / 100) * 255); }
   function isFanOn(rawSpeed: number): boolean { return rawSpeed > 0; }
   async function stepFan(name: string, rawSpeed: number, delta: number) {
     const pct = Math.min(100, Math.max(0, fanToPercent(rawSpeed) + delta));
     await handleFan(name, percentToFan(pct));
+=======
+  let pending: Record<string, number> = {};
+  let timers: Record<string, ReturnType<typeof setTimeout>> = {};
+  let ledPending: boolean | null = null;
+
+  $: displayLed = ledPending ?? ledOn;
+
+  function fanToPercent(raw: number) { return Math.round((raw / 255) * 100); }
+  function percentToFan(pct: number) { return Math.round((pct / 100) * 255); }
+
+  function queueFan(name: string, pct: number) {
+    clearTimeout(timers[name]);
+    error = '';
+
+    pending = { ...pending, [name]: pct };
+
+    timers[name] = setTimeout(async () => {
+      try {
+        await setFan(name, percentToFan(pct));
+      } catch (e) {
+        error = toErrorMessage(e);
+      } finally {
+        const { [name]: _, ...rest } = pending;
+        pending = rest;
+      }
+    }, 350);
+>>>>>>> Stashed changes
   }
   async function toggleFan(name: string, rawSpeed: number) {
     await handleFan(name, rawSpeed > 0 ? 0 : Math.round(255 * 0.5));
