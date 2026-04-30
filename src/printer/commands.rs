@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-/// Shared map of in-flight RPC calls awaiting a printer response.
+/// pending RPCs
 pub type PendingRpcs = Arc<tokio::sync::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Value>>>>;
 
-/// Command sent over ws_cmd_tx (9001) or raw_cmd_tx (1883).
+/// ws/raw command
 #[derive(Debug, Clone)]
 pub struct Command {
     pub id: u64,

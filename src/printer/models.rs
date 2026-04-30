@@ -1,4 +1,4 @@
-//! MQTT wire structs for the CC2 protocol.
+//! mqtt models
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ pub struct FullStatus {
     pub print_status: PrintStatus,
     pub tool_head: ToolHead,
     pub ztemperature_sensor: ZTemperatureSensor,
-    /// AMS tray info from method 6000.
+    /// AMS tray info
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canvas_info: Option<serde_json::Value>,
 }
@@ -307,6 +307,7 @@ pub const METHOD_SET_FAN: u16 = 1030;
 pub const METHOD_SET_SPEED_MODE: u16 = 1031;
 pub const METHOD_GET_PRINT_HISTORY: u16 = 1036;
 pub const METHOD_GET_FILE_LIST: u16 = 1044;
+pub const METHOD_GET_FILE_THUMBNAIL: u16 = 1045;
 pub const METHOD_GET_FILE_INFO: u16 = 1046;
 pub const METHOD_SET_AMS_AUTO_REFILL: u16 = 2004;
 pub const METHOD_GET_AMS_INFO: u16 = 2005;

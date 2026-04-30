@@ -83,7 +83,7 @@ pub enum PrinterError {
     #[error("printer not connected")]
     NotConnected,
 
-    // Returned when the printer acknowledges a command with a non-zero error code.
+    // cmd non-zero code
     #[allow(dead_code)]
     #[error("command failed: method {method}, error_code {error_code}")]
     CommandFailed { method: u16, error_code: u16 },
@@ -116,4 +116,6 @@ pub enum NotificationError {
     NtfyFailed(String),
     #[error("discord notification failed: {0}")]
     DiscordFailed(String),
+    #[error("webhook notification failed: {0}")]
+    WebhookFailed(String),
 }

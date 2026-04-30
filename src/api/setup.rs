@@ -188,7 +188,7 @@ pub async fn scan_network(
 
     info!("scanning {} addresses across {} subnet(s)", ips.len(), subnets.len());
 
-    // phase 1: probe 1883/9001/80 and keep reachable hosts
+    // phase1 port probe
     let candidates: Vec<String> = futures::stream::iter(ips)
         .map(|ip| async move {
             for port in [1883u16, 9001, 80] {
@@ -206,7 +206,7 @@ pub async fn scan_network(
 
     info!("port probe found {} candidates, running protocol verification", candidates.len());
 
-    // phase 2: verify elegoo mqtt handshake
+    // phase2 mqtt verify
     let mut printers: Vec<DiscoveredPrinter> = futures::stream::iter(candidates)
         .map(|ip| async move {
             let verified = verify_elegoo_mqtt(&ip, 3).await;
@@ -226,7 +226,7 @@ pub async fn scan_network(
     Ok(Json(ScanResponse { printers }))
 }
 
-/// Attempts to connect to MQTT on port 1883 and listens for an elegoo topic message.
+/// verify mqtt handshake
 async fn verify_elegoo_mqtt(ip: &str, timeout_secs: u64) -> bool {
     let suffix: String = (0..4).map(|_| rand::thread_rng().gen_range(0..10u8).to_string()).collect();
     let client_id = format!("cc2_scan_{suffix}");
@@ -364,7 +364,7 @@ pub async fn save_config(
 fn detect_local_subnets() -> Vec<String> {
     let mut subnets = Vec::new();
 
-    // Parse `ip addr` to get all assigned interface addresses (more reliable than ip route).
+    // parse ip addr
     if let Ok(output) = Command::new("ip").args(["addr"]).output() {
         if let Ok(text) = String::from_utf8(output.stdout) {
             for line in text.lines() {
@@ -385,7 +385,7 @@ fn detect_local_subnets() -> Vec<String> {
         }
     }
 
-    // Fallback: parse `ip route` for the route associated with the default gateway's interface.
+    // fallback ip route
     if subnets.is_empty() {
         if let Ok(output) = Command::new("ip").args(["route"]).output() {
             if let Ok(routes) = String::from_utf8(output.stdout) {

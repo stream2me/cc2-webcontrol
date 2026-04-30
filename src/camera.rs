@@ -5,10 +5,10 @@ use futures::StreamExt;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-/// Shared JPEG frame buffer. None until first frame arrives.
+/// jpeg frame buffer
 pub type FrameBuffer = Arc<RwLock<Option<Vec<u8>>>>;
 
-/// Spawns the background task that owns the single MJPEG connection.
+/// spawn frame grabber
 pub fn spawn_frame_grabber(camera_ip: String, buffer: FrameBuffer) {
     tokio::spawn(async move {
         let mut backoff = 2u64;
@@ -52,7 +52,7 @@ pub fn spawn_frame_grabber(camera_ip: String, buffer: FrameBuffer) {
                                     *buffer.write().await = Some(frame);
                                 }
 
-                                // drop old data if no good frame
+                                // drop stale buffer
                                 if buf.len() > 4 * 1024 * 1024 {
                                     warn!("[grabber] buffer flushing");
                                     buf.clear();
@@ -65,7 +65,7 @@ pub fn spawn_frame_grabber(camera_ip: String, buffer: FrameBuffer) {
                         }
                     }
 
-                    // Reset backoff if the stream was healthy for a while.
+                    // reset backoff
                     if stream_start.elapsed().as_secs() >= 10 {
                         backoff = 2;
                     }
@@ -86,7 +86,7 @@ pub fn spawn_frame_grabber(camera_ip: String, buffer: FrameBuffer) {
     });
 }
 
-/// extract first jpeg from `buf`,
+/// extract first jpeg
 fn try_extract_frame(buf: &mut Vec<u8>) -> Option<Vec<u8>> {
     let start = find_seq(buf, &[0xFF, 0xD8])?;
     let rel_end = find_seq(&buf[start..], &[0xFF, 0xD9])?;

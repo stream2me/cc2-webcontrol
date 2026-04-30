@@ -149,7 +149,7 @@
     align-items: start;
   }
 
-  /* Left jog column */
+  /* jog col */
   .jog-col { display: flex; flex-direction: column; gap: 14px; }
 
   .pos-steps-row {
@@ -195,7 +195,7 @@
     padding: 4px 0;
   }
 
-  /* Pill groups */
+  /* pill group */
   .pill-group {
     display: flex;
     flex-direction: column;
@@ -222,7 +222,8 @@
     color: var(--accent);
   }
   .pill-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-  .pill-btn:disabled:hover { background: var(--accent-dim); color: var(--accent); opacity: 0.55; } /* preserve hover per spec */
+  /* keep hover */
+  .pill-btn:disabled:hover { background: var(--accent-dim); color: var(--accent); opacity: 0.55; }
   .pill-lbl {
     font-size: 11px;
     font-weight: 700;

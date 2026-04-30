@@ -8,6 +8,7 @@ use super::models::{DeviceInfo, FullStatus};
 use crate::detection::obico::Detection;
 
 pub const EVENTS_LOG_PATH: &str = "data/events.log";
+pub const DETECTION_LOG_PATH: &str = "data/detection.log";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrintState {
@@ -16,7 +17,7 @@ pub enum PrintState {
     Paused,
 }
 
-/// One data point in the detection history.
+/// detection point
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DetectionPoint {
     pub ts: u64,
@@ -34,16 +35,18 @@ pub struct PrinterState {
     pub full: FullStatus,
     pub device_info: Option<DeviceInfo>,
     pub printer_ip: String,
-    /// True when both raw (port 1883) and ws (port 9001) clients are connected.
+    /// raw+ws connected
     pub connected: bool,
     pub connected_raw: bool,
     pub connected_ws: bool,
     pub detection_score: f64,
     pub detection_history: VecDeque<DetectionPoint>,
-    /// Latest bounding-box detections from the Obico ML API (after zone filtering).
+    /// latest detections
     pub latest_detections: Vec<Detection>,
     pub latest_detection_ts: u64,
     pub events: Vec<PrinterEvent>,
+    /// event total mono
+    pub events_total: u64,
     pub files: Vec<Value>,
 }
 
@@ -55,7 +58,7 @@ pub struct PrinterEvent {
     pub snapshot: Option<String>,
 }
 
-// EventKind values are logged via Debug names.
+// debug names
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum EventKind {
@@ -84,7 +87,7 @@ pub enum EventKind {
     RawConnected,
     RawDisconnected,
     ErrorOccurred(String),
-    /// Event loaded from persisted log on startup; inner string is the original kind name.
+    /// loaded event kind
     Loaded(String),
 }
 
@@ -98,17 +101,18 @@ impl PrinterState {
             connected_raw: false,
             connected_ws: false,
             detection_score: 0.0,
-            detection_history: VecDeque::with_capacity(30),
+            detection_history: VecDeque::with_capacity(200),
             latest_detections: Vec::new(),
             latest_detection_ts: 0,
             events: Vec::with_capacity(100),
+            events_total: 0,
             files: Vec::new(),
         }
     }
 
     pub fn seed(&mut self, status: FullStatus) {
         let old_state = self.print_state();
-        // 1002 response never includes canvas_info; preserve it across seed calls
+        // keep canvas_info
         let saved_canvas = self.full.canvas_info.take();
         self.full = status;
         if self.full.canvas_info.is_none() {
@@ -145,14 +149,24 @@ impl PrinterState {
     }
 
     pub fn add_event(&mut self, kind: EventKind, description: String) {
+        // dedup same kind+msg
+        if let Some(last) = self.events.last() {
+            if std::mem::discriminant(&last.kind) == std::mem::discriminant(&kind)
+                && last.description == description
+            {
+                return;
+            }
+        }
         let e = PrinterEvent {
             timestamp: std::time::SystemTime::now(),
             kind,
             description,
             snapshot: None,
         };
+        #[cfg(not(test))]
         Self::persist_event(&e);
         self.events.push(e);
+        self.events_total += 1;
         if self.events.len() > 100 {
             self.events.remove(0);
         }
@@ -170,14 +184,40 @@ impl PrinterState {
             description,
             snapshot,
         };
+        #[cfg(not(test))]
         Self::persist_event(&e);
         self.events.push(e);
+        self.events_total += 1;
         if self.events.len() > 100 {
             self.events.remove(0);
         }
     }
 
-    /// Load last `limit` events from the JSONL log file.
+    /// append detection log
+    pub fn persist_detection_point(pt: &DetectionPoint) {
+        let Ok(line) = serde_json::to_string(pt) else { return };
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(DETECTION_LOG_PATH)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    /// load detection history
+    pub fn load_detection_history(limit: usize) -> VecDeque<DetectionPoint> {
+        let Ok(data) = std::fs::read_to_string(DETECTION_LOG_PATH) else {
+            return VecDeque::new();
+        };
+        let points: Vec<DetectionPoint> = data.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let skip = points.len().saturating_sub(limit);
+        points.into_iter().skip(skip).collect()
+    }
+
+    /// load events log
     pub fn load_events_from_log(limit: usize) -> Vec<PrinterEvent> {
         let Ok(data) = std::fs::read_to_string(EVENTS_LOG_PATH) else { return Vec::new(); };
         data.lines()
@@ -265,7 +305,9 @@ fn truncate_filename(name: &str) -> String {
     if name.len() <= 40 {
         name.to_string()
     } else {
-        format!("...{}", &name[name.len() - 37..])
+        let mut cut = name.len() - 37;
+        while !name.is_char_boundary(cut) { cut += 1; }
+        format!("...{}", &name[cut..])
     }
 }
 

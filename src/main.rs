@@ -51,7 +51,16 @@ async fn main() {
         let past = PrinterState::load_events_from_log(100);
         if !past.is_empty() {
             let mut s = manager.state.write().await;
+            s.events_total = past.len() as u64;
             s.events = past;
+        }
+    }
+
+    {
+        let history = PrinterState::load_detection_history(200);
+        if !history.is_empty() {
+            let mut s = manager.state.write().await;
+            s.detection_history = history;
         }
     }
 

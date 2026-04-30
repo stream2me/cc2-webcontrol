@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::Value;
@@ -6,8 +6,10 @@ use tracing::{debug, warn};
 
 use super::router::AppState;
 use crate::config::ExcludeZone;
+use crate::detection::grouping;
 use crate::detection::obico::ObicoClient;
 use crate::error::AppError;
+use crate::printer::state::PrinterState;
 
 #[derive(serde::Serialize)]
 pub struct DetectionStatusResponse {
@@ -83,7 +85,26 @@ pub async fn update_config(
     Ok(Json(Value::Null))
 }
 
-/// GET /api/detection/latest - return latest ml result 
+/// detection history
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    pub filename: Option<String>,
+    pub limit: Option<usize>,
+}
+
+pub async fn get_history(
+    Query(q): Query<HistoryQuery>,
+) -> Result<Json<Value>, AppError> {
+    let limit = q.limit.unwrap_or(200).min(500);
+    let mut points = PrinterState::load_detection_history(limit);
+    if let Some(ref filename) = q.filename {
+        points.retain(|p| p.print_filename.as_deref() == Some(filename.as_str()));
+    }
+    let pts: Vec<_> = points.into_iter().collect();
+    Ok(Json(serde_json::to_value(&pts).unwrap_or(Value::Array(vec![]))))
+}
+
+/// latest detection
 pub async fn get_latest(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {
@@ -95,7 +116,7 @@ pub async fn get_latest(
     })))
 }
 
-/// PUT /api/detection/zones - replace exclusion zones
+/// set zones
 pub async fn set_zones(
     State(state): State<AppState>,
     Json(zones): Json<Vec<ExcludeZone>>,
@@ -109,7 +130,29 @@ pub async fn set_zones(
     Ok(Json(Value::Null))
 }
 
-/// POST /api/detection/run - run detection on current frame on demand
+/// grouped detection points
+#[derive(Deserialize)]
+pub struct GroupedQuery {
+    pub filename: Option<String>,
+    pub limit: Option<usize>,
+    pub window_secs: Option<u64>,
+}
+
+pub async fn get_grouped(
+    Query(q): Query<GroupedQuery>,
+) -> Result<Json<Value>, AppError> {
+    let limit = q.limit.unwrap_or(500).min(1000);
+    let window_secs = q.window_secs.unwrap_or(300);
+    let mut points = PrinterState::load_detection_history(limit);
+    if let Some(ref filename) = q.filename {
+        points.retain(|p| p.print_filename.as_deref() == Some(filename.as_str()));
+    }
+    let pts: Vec<_> = points.into_iter().collect();
+    let groups = grouping::group_detection_points(&pts, window_secs, 0.4);
+    Ok(Json(serde_json::to_value(&groups).unwrap_or(Value::Array(vec![]))))
+}
+
+/// run detection
 pub async fn run_detection(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {

@@ -3,28 +3,35 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, RwLock};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::config::{AppConfig, DestinationKind, EventToggles, NotificationDestination};
 use crate::printer::state::{EventKind, PrinterEvent, PrinterState};
 
-use super::{discord, ntfy, payload};
+use super::{discord, ntfy, payload, webhook};
 
 const COOLDOWN_SECS: u64 = 120;
 
 pub struct NotificationManager {
     state: Arc<RwLock<PrinterState>>,
     config: Arc<RwLock<AppConfig>>,
-    last_processed: usize,
+    /// last events_total
+    last_processed_total: u64,
     cooldowns: HashMap<String, Instant>,
 }
 
 impl NotificationManager {
     pub fn new(state: Arc<RwLock<PrinterState>>, config: Arc<RwLock<AppConfig>>) -> Self {
+        // seed current total
+        let last_processed_total = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                state.read().await.events_total
+            })
+        });
         Self {
             state,
             config,
-            last_processed: 0,
+            last_processed_total,
             cooldowns: HashMap::new(),
         }
     }
@@ -45,19 +52,19 @@ impl NotificationManager {
     async fn process_new_events(&mut self) {
         let (new_events, destinations) = {
             let state = self.state.read().await;
+            let events_total = state.events_total;
             let events = &state.events;
 
-            let start = if self.last_processed <= events.len() {
-                self.last_processed
-            } else {
-                0
-            };
+            // new events count
+            let unprocessed = (events_total.saturating_sub(self.last_processed_total)) as usize;
+            // cap by buffer
+            let to_take = unprocessed.min(events.len());
+            let new: Vec<PrinterEvent> = events[events.len() - to_take..].to_vec();
 
-            let new: Vec<PrinterEvent> = events[start..].to_vec();
-            self.last_processed = events.len();
+            self.last_processed_total = events_total;
 
-            let config = self.config.read().await;
-            (new, config.notifications.destinations.clone())
+            let destinations = self.config.read().await.notifications.destinations.clone();
+            (new, destinations)
         };
 
         for event in &new_events {
@@ -110,17 +117,17 @@ fn event_matches_toggles(kind: &EventKind, t: &EventToggles) -> bool {
 
 async fn dispatch(dest: &NotificationDestination, title: &str, body: &str, color: u32) {
     match dest.kind {
-        DestinationKind::Ntfy => {
-            if let Err(e) = ntfy::send(dest, title, body).await {
-                warn!("[notifications] ntfy '{}' failed: {e}", dest.label);
-            }
-        }
-        DestinationKind::Discord => {
-            if let Err(e) = discord::send(dest, title, body, color).await {
-                warn!("[notifications] discord '{}' failed: {e}", dest.label);
-            }
-        }
-        DestinationKind::Webhook => {
-        }
+        DestinationKind::Ntfy => match ntfy::send(dest, title, body).await {
+            Ok(()) => info!("[notifications] ntfy '{}' sent: {title}", dest.label),
+            Err(e) => warn!("[notifications] ntfy '{}' failed: {e}", dest.label),
+        },
+        DestinationKind::Discord => match discord::send(dest, title, body, color).await {
+            Ok(()) => info!("[notifications] discord '{}' sent: {title}", dest.label),
+            Err(e) => warn!("[notifications] discord '{}' failed: {e}", dest.label),
+        },
+        DestinationKind::Webhook => match webhook::send(dest, title, body).await {
+            Ok(()) => info!("[notifications] webhook '{}' sent: {title}", dest.label),
+            Err(e) => warn!("[notifications] webhook '{}' failed: {e}", dest.label),
+        },
     }
 }

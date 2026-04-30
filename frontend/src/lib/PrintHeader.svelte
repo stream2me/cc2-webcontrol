@@ -1,6 +1,6 @@
 <script lang="ts">
   import { printer } from '../stores';
-  import { pausePrint, resumePrint, stopPrint } from '../api';
+  import { pausePrint, resumePrint, stopPrint, getThumbnail } from '../api';
   import ConfirmModal from './ConfirmModal.svelte';
   import { toErrorMessage } from './errors';
 
@@ -21,6 +21,30 @@
   let error = '';
   let showPauseModal = false;
   let showStopModal = false;
+
+  let thumbDataUri = '';
+  const thumbCache = new Map<string, string>();
+
+  $: if (isActive && filename) {
+    loadThumb(filename);
+  } else if (!isActive) {
+    thumbDataUri = '';
+  }
+
+  async function loadThumb(name: string) {
+    const cached = thumbCache.get(name);
+    if (cached !== undefined) { thumbDataUri = cached; return; }
+    try {
+      const resp = await getThumbnail(name);
+      if (resp.thumbnail) {
+        const uri = `data:image/png;base64,${resp.thumbnail}`;
+        thumbCache.set(name, uri);
+        if (filename === name) thumbDataUri = uri;
+      }
+    } catch {
+      // unavailable, keep placeholder
+    }
+  }
 
   function formatTime(sec: number): string {
     if (!sec) return '--';
@@ -103,12 +127,16 @@
   <div class="print-header">
     <div class="thumb">
       {#if isActive}
-        <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="52" height="52" rx="5" fill="#1a2740"/>
-          <path d="M26 10L42 18V34L26 42L10 34V18L26 10Z" stroke="#2d87f0" stroke-width="2" fill="none"/>
-          <path d="M26 10V42M10 18L42 18M10 34L42 34" stroke="#2d87f0" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>
-          <circle cx="26" cy="26" r="4" fill="#2d87f0" opacity="0.8"/>
-        </svg>
+        {#if thumbDataUri}
+          <img src={thumbDataUri} alt="Print preview" class="thumb-img" />
+        {:else}
+          <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="52" height="52" rx="5" fill="#1a2740"/>
+            <path d="M26 10L42 18V34L26 42L10 34V18L26 10Z" stroke="#2d87f0" stroke-width="2" fill="none"/>
+            <path d="M26 10V42M10 18L42 18M10 34L42 34" stroke="#2d87f0" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>
+            <circle cx="26" cy="26" r="4" fill="#2d87f0" opacity="0.8"/>
+          </svg>
+        {/if}
       {:else}
         <div class="thumb-empty">
           <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
@@ -218,6 +246,12 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+  }
+
+  .thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
   .thumb-empty {

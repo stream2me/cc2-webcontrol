@@ -30,7 +30,9 @@
   onMount(async () => {
     try {
       settings = await getSettings();
-    } catch { /* fallback to defaults */ }
+    } catch {
+      // fallback defaults
+    }
   });
 
   async function saveSettings() {
@@ -257,7 +259,7 @@
     background: var(--accent-dim); color: var(--accent);
   }
 
-  /* Sidebar */
+  /* sidebar */
   .nav {
     display: flex; flex-direction: column;
     padding: 14px 10px 14px 14px;
@@ -301,7 +303,7 @@
   .nav-desc { font-size: 10.5px; color: var(--muted2); letter-spacing: 0.01em; }
   .nav-item.active .nav-desc { color: var(--muted); }
 
-  /* Content */
+  /* content */
   .content {
     padding: 22px 26px 24px;
     overflow-y: auto;
@@ -313,7 +315,7 @@
   .section-head p { font-size: 12.5px; color: var(--muted); margin-top: 4px; line-height: 1.55; max-width: 56ch; }
   .section-wrap { display: flex; flex-direction: column; gap: 14px; }
 
-  /* Footer */
+  /* footer */
   .modal-foot {
     padding: 12px 18px;
     border-top: 1px solid var(--border);

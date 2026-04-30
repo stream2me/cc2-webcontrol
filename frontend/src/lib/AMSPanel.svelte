@@ -201,6 +201,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
+    grid-auto-flow: column;
     gap: 10px;
     min-width: 0;
   }
@@ -309,7 +310,7 @@
     border-radius: var(--radius-pill);
   }
 
-  /*right actions */
+  /* slot actions */
   .slot-actions {
     display: flex;
     flex-direction: column;

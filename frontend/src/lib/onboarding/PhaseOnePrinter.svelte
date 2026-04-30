@@ -225,7 +225,7 @@
   .card-head h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; }
   .card-head p { color: var(--muted); font-size: 13px; line-height: 1.6; margin-top: 8px; max-width: 62ch; }
 
-  /* Hero */
+  /* hero */
   .hero { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; align-items: center; padding: 40px 40px 36px; }
   .hero-copy h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; margin-top: 8px; }
   .hero-copy p { color: var(--muted); font-size: 13.5px; line-height: 1.6; margin-top: 12px; max-width: 44ch; }
@@ -242,7 +242,7 @@
   .printer-img { position: relative; width: 210px; height: auto; filter: drop-shadow(0 12px 20px rgba(0,0,0,0.4)); animation: float 5s ease-in-out infinite; }
   @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 
-  /* Scan */
+  /* scan */
   .scan-stage { display: flex; flex-direction: column; align-items: center; gap: 14px; min-height: 180px; justify-content: center; padding: 10px 0; }
   .radar-wrap { position: relative; width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; }
   .radar-core { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px var(--accent); }
@@ -260,7 +260,7 @@
   .list-row .ip { font-size: 13px; flex: 1; }
   .list-arrow { color: var(--muted); }
 
-  /* Form */
+  /* form */
   .form { display: flex; flex-direction: column; gap: 0; }
   .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
   .field-label { font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -269,7 +269,7 @@
   .pincode-disabled .pin { opacity: 0.55; cursor: not-allowed; }
   .field-hint.warn { color: var(--danger); }
 
-  /* Verify */
+  /* verify */
   .verify-stack { display: flex; flex-direction: column; align-items: center; gap: 14px; }
   .big-spinner { width: 36px; height: 36px; border: 2.5px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
   .verify-line { color: var(--muted); font-size: 13px; }

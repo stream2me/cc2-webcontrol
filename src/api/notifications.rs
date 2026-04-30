@@ -1,12 +1,13 @@
 use axum::extract::{Path, State};
 use axum::Json;
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
 
 use super::router::AppState;
-use crate::config::{DestinationKind, NotificationDestination};
+use crate::config::{DestinationKind, EventToggles, NotificationDestination};
 use crate::error::AppError;
-use crate::notifications::{discord, ntfy};
+use crate::notifications::{discord, ntfy, webhook};
 
 fn gen_id() -> String {
     use rand::Rng;
@@ -42,10 +43,21 @@ pub async fn create_destination(
     Ok(Json(serde_json::json!({ "success": true, "id": id })))
 }
 
+#[derive(Deserialize)]
+pub struct UpdateDestinationReq {
+    pub enabled: Option<bool>,
+    pub label: Option<String>,
+    pub ntfy_server: Option<String>,
+    pub ntfy_topic: Option<String>,
+    pub discord_webhook_url: Option<String>,
+    pub webhook_url: Option<String>,
+    pub toggles: Option<EventToggles>,
+}
+
 pub async fn update_destination(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<NotificationDestination>,
+    Json(req): Json<UpdateDestinationReq>,
 ) -> Result<Json<Value>, AppError> {
     let mut config = state.config.write().await;
     let dest = config
@@ -53,10 +65,18 @@ pub async fn update_destination(
         .destinations
         .iter_mut()
         .find(|d| d.id == id)
-        .ok_or_else(|| AppError::Validation(format!("destination {id} not found")))?;
-    *dest = NotificationDestination { id: id.clone(), ..req };
+        .ok_or_else(|| AppError::Validation(format!("destination '{id}' not found")))?;
+
+    if let Some(v) = req.enabled { dest.enabled = v; }
+    if let Some(v) = req.label { dest.label = v; }
+    if let Some(v) = req.ntfy_server { dest.ntfy_server = Some(v); }
+    if let Some(v) = req.ntfy_topic { dest.ntfy_topic = Some(v); }
+    if let Some(v) = req.discord_webhook_url { dest.discord_webhook_url = Some(v); }
+    if let Some(v) = req.webhook_url { dest.webhook_url = Some(v); }
+    if let Some(v) = req.toggles { dest.toggles = v; }
+
     if let Err(e) = config.save("config.toml") {
-        warn!("failed to save config: {e}");
+        warn!("failed to save config after updating destination '{id}': {e}");
         return Err(config_err(e));
     }
     Ok(Json(serde_json::json!({ "success": true })))
@@ -96,11 +116,7 @@ pub async fn test_destination(
     match dest.kind {
         DestinationKind::Ntfy => ntfy::send_test(&dest).await?,
         DestinationKind::Discord => discord::send_test(&dest).await?,
-        DestinationKind::Webhook => {
-            return Err(AppError::Validation(
-                "webhook test not supported yet".to_string(),
-            ));
-        }
+        DestinationKind::Webhook => webhook::send(&dest, "CC2 Monitor", "Test notification - webhook is working").await?,
     }
 
     Ok(Json(serde_json::json!({ "ok": true })))

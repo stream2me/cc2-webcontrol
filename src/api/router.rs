@@ -78,10 +78,13 @@ pub fn build_router(
         .route("/api/printer/files", get(printer::get_files))
         .route("/api/printer/history", get(printer::get_history))
         .route("/api/printer/canvas/refresh", post(printer::canvas_refresh))
+        .route("/api/printer/thumbnail", get(printer::get_thumbnail))
         .route("/api/printer/upload", post(upload::upload_file))
         .route("/api/detection/status", get(detection::get_status))
         .route("/api/detection/toggle", post(detection::toggle))
         .route("/api/detection/config", post(detection::update_config))
+        .route("/api/detection/history", get(detection::get_history))
+        .route("/api/detection/grouped", get(detection::get_grouped))
         .route("/api/detection/latest", get(detection::get_latest))
         .route("/api/detection/zones", axum::routing::put(detection::set_zones))
         .route("/api/detection/run", post(detection::run_detection))
@@ -91,33 +94,24 @@ pub fn build_router(
         .route("/api/setup/obico/test", get(obico::test_container))
         .route("/api/setup/obico/test-url", post(obico::test_url))
         .route("/api/setup/obico/stop", post(obico::stop_container))
-        .route("/api/notifications/destinations", get(notifications::list_destinations))
-        .route("/api/notifications/destinations", post(notifications::create_destination))
-        .route("/api/notifications/destinations/:id", axum::routing::put(notifications::update_destination))
-        .route("/api/notifications/destinations/:id", axum::routing::delete(notifications::delete_destination))
+        .route("/api/notifications/destinations",
+            get(notifications::list_destinations).post(notifications::create_destination))
+        .route("/api/notifications/destinations/:id",
+            axum::routing::put(notifications::update_destination)
+                .delete(notifications::delete_destination))
         .route("/api/notifications/destinations/:id/test", post(notifications::test_destination))
         .route("/api/camera/snapshot", get(camera::snapshot))
-        .route("/api/settings", get(settings::get_settings))
-        .route("/api/settings", post(settings::update_settings))
-        .route("/api/logs", get(logs::get_logs))
-        .route("/api/logs", axum::routing::delete(logs::delete_logs))
-        .route("/api/snapshots", get(snapshots::list_snapshots))
-        .route("/api/snapshots", axum::routing::delete(snapshots::delete_all_snapshots))
+        .route("/api/settings",
+            get(settings::get_settings).post(settings::update_settings))
+        .route("/api/logs",
+            get(logs::get_logs).delete(logs::delete_logs))
+        .route("/api/snapshots",
+            get(snapshots::list_snapshots).delete(snapshots::delete_all_snapshots))
         .route("/api/snapshots/:filename", axum::routing::delete(snapshots::delete_snapshot))
         .route("/ws", get(ws::ws_handler))
         .with_state(app_state);
 
-    let frontend_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            let mut dir = p;
-            for _ in 0..3 {
-                dir = dir.parent()?.to_path_buf();
-            }
-            Some(dir)
-        })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let frontend_dir = frontend_dir.join("frontend/dist");
+    let frontend_dir = find_frontend_dir().join("frontend/dist");
 
     tracing::info!("serving frontend from: {:?}", frontend_dir);
 
@@ -130,15 +124,8 @@ pub fn build_router(
     api.merge(frontend)
 }
 
-async fn health() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({
-        "status": "ok",
-        "version": env!("CARGO_PKG_VERSION"),
-    }))
-}
-
-async fn serve_index() -> axum::response::Html<String> {
-    let frontend_dir = std::env::current_exe()
+fn find_frontend_dir() -> std::path::PathBuf {
+    std::env::current_exe()
         .ok()
         .and_then(|p| {
             let mut dir = p;
@@ -147,8 +134,18 @@ async fn serve_index() -> axum::response::Html<String> {
             }
             Some(dir)
         })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let index_path = frontend_dir.join("frontend/dist/index.html");
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+async fn health() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+async fn serve_index() -> axum::response::Html<String> {
+    let index_path = find_frontend_dir().join("frontend/dist/index.html");
     match std::fs::read_to_string(&index_path) {
         Ok(html) => axum::response::Html(html),
         Err(e) => {

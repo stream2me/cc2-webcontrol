@@ -6,8 +6,7 @@ use tracing::{debug, info, warn};
 use crate::config::ExcludeZone;
 use crate::error::DetectionError;
 
-/// A single spaghetti detection from the Obico ML API.
-/// Coordinates are normalized 0.0-1.0 relative to the image dimensions.
+/// obico detection box
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Detection {
     pub x1: f64,
@@ -40,8 +39,7 @@ impl ObicoClient {
         }
     }
 
-    /// Send frame to Obico and return score plus detections.
-    /// Detections inside exclude zones are filtered before scoring.
+    /// analyze frame
     pub async fn analyze_snapshot(
         &self,
         obico_img_url: &str,
@@ -81,10 +79,7 @@ impl ObicoClient {
     }
 }
 
-/// Save a JPEG frame when a non-zero detection score is observed.
-/// Stored as `snapshots/detection_{timestamp}_{score_pct}.jpg`.
-/// Also writes a sidecar `.json` file with detection box data.
-/// Returns the saved path on success.
+/// save snapshot
 pub fn save_detection_snapshot(jpeg: &[u8], score: f64, detections: &[Detection]) -> Option<std::path::PathBuf> {
     let snap_dir = std::path::Path::new("snapshots");
     let _ = std::fs::create_dir_all(snap_dir);
@@ -113,8 +108,7 @@ pub fn save_detection_snapshot(jpeg: &[u8], score: f64, detections: &[Detection]
     }
 }
 
-/// Keep the snapshots directory bounded to `max_files` jpg entries.
-/// Deletes the oldest jpg files and their json sidecars when over the limit.
+/// prune old snapshots
 fn prune_snapshots(dir: &std::path::Path, max_files: usize) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
@@ -141,7 +135,7 @@ fn prune_snapshots(dir: &std::path::Path, max_files: usize) {
     }
 }
 
-/// Trim trailing /p variants so URL ends with /p/.
+/// normalize base url
 fn normalize_base_url(raw: &str) -> String {
     let mut s = raw.trim().trim_end_matches('/').to_string();
     if s.ends_with("/p") {
@@ -150,7 +144,7 @@ fn normalize_base_url(raw: &str) -> String {
     s.trim_end_matches('/').to_string()
 }
 
-/// Scan JPEG bytes for an SOF marker (0xFF 0xC0 or 0xFF 0xC2) to read (width, height).
+/// read jpeg dims
 pub fn read_jpeg_dims(jpeg: &[u8]) -> Option<(f64, f64)> {
     if jpeg.len() < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
         return None;
@@ -164,7 +158,6 @@ pub fn read_jpeg_dims(jpeg: &[u8]) -> Option<(f64, f64)> {
         if marker == 0xD9 {
             break; // EOI
         }
-        // SOF0 (baseline) or SOF2 (progressive)
         if (marker == 0xC0 || marker == 0xC2) && i + 8 < jpeg.len() {
             let h = ((jpeg[i + 5] as u32) << 8) | (jpeg[i + 6] as u32);
             let w = ((jpeg[i + 7] as u32) << 8) | (jpeg[i + 8] as u32);
@@ -172,15 +165,13 @@ pub fn read_jpeg_dims(jpeg: &[u8]) -> Option<(f64, f64)> {
                 return Some((w as f64, h as f64));
             }
         }
-        // skip this segment: 2 bytes marker + 2 bytes length field
         let seg_len = ((jpeg[i + 2] as usize) << 8) | (jpeg[i + 3] as usize);
         i += 2 + seg_len;
     }
     None
 }
 
-/// Parse Obico response and normalize boxes to 0..1.
-/// Supports COCO detections and legacy fallback formats.
+/// parse obico response
 fn parse_obico_response(
     body: &str,
     exclude_zones: &[ExcludeZone],
@@ -214,7 +205,7 @@ fn parse_obico_response(
     } else if !all_detections.is_empty() && all_detections_excluded(&all_detections, exclude_zones) {
         0.0
     } else {
-        // Fallback: some Obico variants include a top-level score field.
+        // fallback score
         value
             .get("fail")
             .or_else(|| value.get("score"))
@@ -230,13 +221,13 @@ fn parse_obico_response(
     Ok(ObicoResult { score, detections: filtered })
 }
 
-/// Parse one detection entry (COCO/object/legacy array).
+/// parse one detection
 fn parse_single_detection(
     det: &serde_json::Value,
     img_dims: Option<(f64, f64)>,
 ) -> Option<Detection> {
     if let Some(arr) = det.as_array() {
-        // Format 1: ["class_label", confidence, [cx, cy, w, h]]
+        // coco arr
         if arr.len() == 3 {
             if let (Some(conf), Some(bbox)) = (arr[1].as_f64(), arr[2].as_array()) {
                 if bbox.len() == 4 {
@@ -255,7 +246,7 @@ fn parse_single_detection(
                 }
             }
         }
-        // Format 3: [x1, y1, x2, y2, confidence] already normalized
+        // norm arr
         if arr.len() >= 5 {
             let nums: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
             if nums.len() >= 5 {
@@ -270,7 +261,7 @@ fn parse_single_detection(
         }
         None
     } else if det.is_object() {
-        // Format 2: object with x1/y1/x2/y2/confidence
+        // obj det
         let x1 = det.get("x1").and_then(|v| v.as_f64())?;
         let y1 = det.get("y1").and_then(|v| v.as_f64())?;
         let x2 = det.get("x2").and_then(|v| v.as_f64())?;
@@ -285,7 +276,7 @@ fn parse_single_detection(
     }
 }
 
-/// Returns true when all detections were excluded by zone filtering.
+/// all detections excluded
 fn all_detections_excluded(detections: &[Detection], exclude_zones: &[ExcludeZone]) -> bool {
     !exclude_zones.is_empty()
         && !detections.is_empty()

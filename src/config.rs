@@ -23,7 +23,7 @@ pub struct PrinterConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExcludeZone {
-    /// Normalized coordinate (0..1).
+    /// norm 0..1
     pub x1: f64,
     pub y1: f64,
     pub x2: f64,
@@ -42,11 +42,10 @@ impl ExcludeZone {
 pub struct DetectionConfig {
     pub enabled: bool,
     pub interval_secs: u32,
-    /// Rolling-average threshold that triggers a notification.
+    /// notify threshold
     #[serde(default = "default_notify_threshold")]
     pub notify_threshold: f64,
-    /// Rolling-average threshold that triggers a notification + auto-pause.
-    /// Must be >= notify_threshold. Old `threshold` field migrates here.
+    /// pause threshold >= notify
     #[serde(alias = "threshold", default = "default_pause_threshold")]
     pub pause_threshold: f64,
     pub confirmation_frames: u32,
@@ -72,7 +71,7 @@ pub struct EventToggles {
     pub print_started: bool,
     #[serde(default = "default_true")]
     pub print_finished: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub print_paused: bool,
     #[serde(default = "default_true")]
     pub failure_notify: bool,
@@ -89,7 +88,7 @@ impl Default for EventToggles {
         Self {
             print_started: true,
             print_finished: true,
-            print_paused: false,
+            print_paused: true,
             failure_notify: true,
             failure_pause: true,
             auto_paused: true,
@@ -243,7 +242,7 @@ fn validate_ip(ip: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Pincode: exactly 6 ASCII alphanumeric chars, case-sensitive.
+/// pincode: 6 ascii alnum
 pub fn validate_pincode(p: &str) -> Result<(), ConfigError> {
     if p.len() != 6 || !p.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(ConfigError::InvalidPincode);

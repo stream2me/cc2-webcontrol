@@ -34,7 +34,9 @@
       const res = await getLatestDetection();
       detections = res.detections ?? [];
       redraw();
-    } catch { /* detection may not be running yet */ }
+    } catch {
+      // detection may be off
+    }
   }
 
   onMount(() => {
@@ -337,7 +339,7 @@
     display: block;
   }
 
-  /* Canvas over the img */
+  /* overlay */
   .overlay {
     position: absolute;
     inset: 0;

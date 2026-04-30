@@ -19,8 +19,10 @@
   let newNtfyServer = 'https://ntfy.sh';
   let newNtfyTopic = '';
   let newDiscordUrl = '';
+  let newWebhookUrl = '';
   let addDestState: 'idle' | 'saving' | 'error' = 'idle';
   let addDestError = '';
+  let saveErrors: Record<string, string> = {};
 
   onMount(() => { loadDestinations(); });
 
@@ -36,11 +38,13 @@
   }
 
   async function saveDest(dest: NotificationDestination) {
+    saveErrors[dest.id] = '';
+    saveErrors = saveErrors;
     try {
       await updateDestination(dest.id, dest);
     } catch (e) {
-      testErrors[dest.id] = toErrorMessage(e);
-      testErrors = testErrors;
+      saveErrors[dest.id] = toErrorMessage(e);
+      saveErrors = saveErrors;
     }
   }
 
@@ -82,7 +86,9 @@
         toggles: defaultToggles(),
         ...(newKind === 'ntfy'
           ? { ntfy_server: newNtfyServer, ntfy_topic: newNtfyTopic }
-          : { discord_webhook_url: newDiscordUrl }),
+          : newKind === 'discord'
+          ? { discord_webhook_url: newDiscordUrl }
+          : { webhook_url: newWebhookUrl }),
       };
       await createDestination(dest);
       await loadDestinations();
@@ -90,6 +96,7 @@
       newLabel = '';
       newNtfyTopic = '';
       newDiscordUrl = '';
+      newWebhookUrl = '';
       addDestState = 'idle';
     } catch (e) {
       addDestState = 'error';
@@ -109,6 +116,9 @@
         <div class="dest-head">
           <span class="kind-badge kind-{dest.kind}">{dest.kind}</span>
           <span class="dest-label-txt">{dest.label}</span>
+          {#if saveErrors[dest.id]}
+            <span class="save-err" title={saveErrors[dest.id]}>Save failed</span>
+          {/if}
           <div class="dest-acts">
             <span class="switch sm">
               <input type="checkbox" bind:checked={dest.enabled} on:change={() => saveDest(dest)} />
@@ -142,6 +152,11 @@
                 <label class="field-lbl" for="dw-{dest.id}">Webhook URL</label>
                 <input id="dw-{dest.id}" class="input mono" type="text" bind:value={dest.discord_webhook_url} />
               </div>
+            {:else if dest.kind === 'webhook'}
+              <div class="field-row">
+                <label class="field-lbl" for="wh-{dest.id}">URL</label>
+                <input id="wh-{dest.id}" class="input mono" type="text" bind:value={dest.webhook_url} />
+              </div>
             {/if}
 
             <div class="toggles-grid">
@@ -174,7 +189,7 @@
     <div class="row">
       <div class="row-label">
         <div class="row-title">Add destination</div>
-        <div class="row-sub">ntfy topic or Discord webhook.</div>
+        <div class="row-sub">ntfy, Discord, or generic webhook.</div>
       </div>
       <button class="btn sm" on:click={() => { addingDest = true; addDestError = ''; addDestState = 'idle'; }}>+ Add</button>
     </div>
@@ -187,6 +202,7 @@
         <div class="kind-pills">
           <button class="kind-pill" class:active={newKind === 'ntfy'} on:click={() => (newKind = 'ntfy')}>ntfy</button>
           <button class="kind-pill" class:active={newKind === 'discord'} on:click={() => (newKind = 'discord')}>Discord</button>
+          <button class="kind-pill" class:active={newKind === 'webhook'} on:click={() => (newKind = 'webhook')}>Webhook</button>
         </div>
       </div>
       <div class="field-row">
@@ -206,6 +222,11 @@
         <div class="field-row">
           <label class="field-lbl" for="new-dw">Webhook URL</label>
           <input id="new-dw" class="input mono" type="text" bind:value={newDiscordUrl} placeholder="https://discord.com/api/webhooks/…" />
+        </div>
+      {:else if newKind === 'webhook'}
+        <div class="field-row">
+          <label class="field-lbl" for="new-wh">URL</label>
+          <input id="new-wh" class="input mono" type="text" bind:value={newWebhookUrl} placeholder="https://example.com/webhook" />
         </div>
       {/if}
       {#if addDestError}
@@ -255,6 +276,7 @@
   .kind-discord { background: #ede9fe; color: #7c3aed; border: 1px solid #ddd6fe; }
   .kind-webhook { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
   .dest-label-txt { flex: 1; font-size: 13px; font-weight: 500; color: var(--text); }
+  .save-err { font-size: 10.5px; color: var(--danger); background: var(--danger-dim); border: 1px solid rgba(192,57,74,0.3); border-radius: var(--radius-sm); padding: 1px 6px; }
   .dest-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 
   .dest-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }

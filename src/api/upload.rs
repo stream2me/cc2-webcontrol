@@ -6,7 +6,7 @@ use tracing::{info, warn};
 use super::router::AppState;
 use crate::error::AppError;
 
-const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB, matches observed slicer behavior
+const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB chunk
 
 pub async fn upload_file(
     State(state): State<AppState>,

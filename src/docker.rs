@@ -14,13 +14,13 @@ pub const OBICO_PORT: u16 = 3333;
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObicoStatus {
-    /// Docker daemon not available on this host.
+    /// docker unavailable
     Unavailable,
-    /// Container does not exist or has never been created.
+    /// container missing
     NotCreated,
-    /// Container exists but is not running.
+    /// container stopped
     Stopped,
-    /// Container is running.
+    /// container running
     Running,
 }
 
@@ -52,14 +52,13 @@ pub async fn status() -> ObicoStatus {
     }
 }
 
-/// Pull image (if needed), create container (if not exists), start it.
-/// Returns once the container is running or on error.
+/// start obico container
 pub async fn start() -> Result<(), String> {
     let docker = connect().ok_or("Docker daemon not available")?;
 
     pull_image_if_needed(&docker).await?;
 
-    // Create container if it doesn't exist
+    // create if missing
     if let Err(_) = docker.inspect_container(OBICO_CONTAINER, None).await {
         create_container(&docker).await?;
     }
@@ -85,7 +84,7 @@ pub async fn stop() -> Result<(), String> {
     Ok(())
 }
 
-/// Poll until the ML container's port accepts TCP connections or timeout expires.
+/// wait obico ready
 pub async fn wait_for_ready(timeout_secs: u64) -> bool {
     let addr = format!("127.0.0.1:{OBICO_PORT}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
@@ -98,12 +97,11 @@ pub async fn wait_for_ready(timeout_secs: u64) -> bool {
     false
 }
 
-/// Start Docker container with real-time progress sent over a channel.
-/// Channel items are (event_type, message): event_type is "log", "ready", or "fail".
+/// start with progress
 pub async fn start_with_progress_channel(tx: tokio::sync::mpsc::Sender<(String, String)>) -> Result<(), String> {
     let docker = connect().ok_or_else(|| "Docker daemon not available".to_string())?;
 
-    // Pull image if not present
+    // pull if missing
     if docker.inspect_image(OBICO_IMAGE).await.is_err() {
         let _ = tx.send(("log".into(), format!("Pulling {}…", OBICO_IMAGE))).await;
         let options = CreateImageOptions { from_image: OBICO_IMAGE, ..Default::default() };
@@ -138,13 +136,13 @@ pub async fn start_with_progress_channel(tx: tokio::sync::mpsc::Sender<(String, 
         let _ = tx.send(("log".into(), "Image already present, skipping pull.".into())).await;
     }
 
-    // Create container if absent
+    // create if missing
     if docker.inspect_container(OBICO_CONTAINER, None).await.is_err() {
         let _ = tx.send(("log".into(), "Creating container…".into())).await;
         create_container(&docker).await?;
     }
 
-    // Start container (ignore "already started")
+    // start container
     let _ = tx.send(("log".into(), "Starting container…".into())).await;
     match docker.start_container(OBICO_CONTAINER, None::<StartContainerOptions<String>>).await {
         Ok(()) => {}
@@ -157,7 +155,7 @@ pub async fn start_with_progress_channel(tx: tokio::sync::mpsc::Sender<(String, 
 }
 
 async fn pull_image_if_needed(docker: &Docker) -> Result<(), String> {
-    // Check if image exists locally
+    // image cached
     if docker.inspect_image(OBICO_IMAGE).await.is_ok() {
         return Ok(());
     }

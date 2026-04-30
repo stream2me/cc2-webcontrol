@@ -12,7 +12,7 @@ pub async fn get_settings(State(state): State<AppState>) -> Result<Json<Value>, 
     Ok(Json(value))
 }
 
-/// Updates config from a partial JSON object and persists to config.toml.
+/// update config + save
 pub async fn update_settings(
     State(state): State<AppState>,
     Json(req): Json<Value>,

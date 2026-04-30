@@ -174,3 +174,26 @@ pub async fn canvas_refresh(
     let data = manager.canvas_refresh().await?;
     Ok(Json(data))
 }
+
+#[derive(Deserialize)]
+pub struct ThumbnailQuery {
+    pub storage: Option<String>,
+    pub filename: String,
+}
+
+pub async fn get_thumbnail(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<ThumbnailQuery>,
+) -> Result<Json<Value>, AppError> {
+    if query.filename.is_empty() {
+        return Err(AppError::Validation("filename is required".to_string()));
+    }
+    let storage = query.storage.as_deref().unwrap_or("local");
+    let manager = state.manager.lock().await;
+    let data = manager.get_file_thumbnail(storage, &query.filename).await?;
+    let thumbnail = data.get("thumbnail").and_then(|v| v.as_str()).unwrap_or("");
+    Ok(Json(serde_json::json!({
+        "thumbnail": thumbnail,
+        "filename": query.filename,
+    })))
+}

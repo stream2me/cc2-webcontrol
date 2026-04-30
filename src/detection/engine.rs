@@ -142,14 +142,17 @@ impl DetectionEngine {
                             {
                                 let mut s = state.write().await;
                                 s.detection_score = score;
-                                s.detection_history.push_back(DetectionPoint {
+                                let pt = DetectionPoint {
                                     ts: now,
                                     score,
                                     snapshot: snapshot_name.clone(),
                                     print_filename: print_filename.clone(),
                                     boxes: detections.clone(),
-                                });
-                                if s.detection_history.len() > 30 {
+                                };
+                                #[cfg(not(test))]
+                                PrinterState::persist_detection_point(&pt);
+                                s.detection_history.push_back(pt);
+                                if s.detection_history.len() > 200 {
                                     s.detection_history.pop_front();
                                 }
                                 s.latest_detections = detections;
@@ -162,47 +165,56 @@ impl DetectionEngine {
                                         snapshot_name,
                                     );
                                 }
-                            }
-                            state_changed_tx.send(()).ok();
 
-                            // Notify threshold check
-                            if rolling_avg >= self.config.notify_threshold {
-                                self.consecutive_notify += 1;
-                                if self.consecutive_notify == self.config.confirmation_frames {
-                                    warn!(
-                                        "[detection] notify threshold confirmed: rolling={rolling_avg:.4}",
-                                    );
-                                    state.write().await.add_event(
-                                        EventKind::FailureNotifyThreshold,
-                                        format!("Failure risk detected (score: {:.0}%)", rolling_avg * 100.0),
-                                    );
-                                }
-                            } else {
-                                self.consecutive_notify = 0;
-                            }
-
-                            // Pause threshold check
-                            if rolling_avg >= self.config.pause_threshold {
-                                self.consecutive_pause += 1;
-                                if self.consecutive_pause == self.config.confirmation_frames {
-                                    warn!(
-                                        "[detection] pause threshold confirmed: rolling={rolling_avg:.4}",
-                                    );
-                                    state.write().await.add_event(
-                                        EventKind::FailurePauseThreshold,
-                                        format!("Print failure confirmed (score: {:.0}%), pausing", rolling_avg * 100.0),
-                                    );
-                                    state.write().await.add_event(
-                                        EventKind::AutoPaused,
-                                        "Print auto-paused by detection engine".to_string(),
-                                    );
-                                    if let Err(e) = manager.lock().await.pause().await {
-                                        warn!("[detection] auto-pause failed: {e}");
+                                // notify by frame score
+                                if score >= self.config.notify_threshold {
+                                    self.consecutive_notify += 1;
+                                    if self.consecutive_notify >= self.config.confirmation_frames {
+                                        warn!(
+                                            "[detection] notify threshold confirmed: score={score:.4}",
+                                        );
+                                        s.add_event(
+                                            EventKind::FailureNotifyThreshold,
+                                            format!("Failure risk detected (score: {:.0}%)", score * 100.0),
+                                        );
+                                        // reset notify counter
+                                        self.consecutive_notify = 0;
                                     }
+                                } else {
+                                    self.consecutive_notify = 0;
                                 }
-                            } else {
-                                self.consecutive_pause = 0;
+
+                                // pause by rolling avg
+                                if rolling_avg >= self.config.pause_threshold {
+                                    self.consecutive_pause += 1;
+                                    if self.consecutive_pause == self.config.confirmation_frames {
+                                        warn!(
+                                            "[detection] pause threshold confirmed: rolling={rolling_avg:.4}",
+                                        );
+                                        s.add_event(
+                                            EventKind::FailurePauseThreshold,
+                                            format!("Print failure confirmed (score: {:.0}%), pausing", rolling_avg * 100.0),
+                                        );
+                                        s.add_event(
+                                            EventKind::AutoPaused,
+                                            "Print auto-paused by detection engine".to_string(),
+                                        );
+                                    }
+                                } else {
+                                    self.consecutive_pause = 0;
+                                }
                             }
+
+                            // pause outside lock
+                            if rolling_avg >= self.config.pause_threshold
+                                && self.consecutive_pause == self.config.confirmation_frames
+                            {
+                                if let Err(e) = manager.lock().await.pause().await {
+                                    warn!("[detection] auto-pause failed: {e}");
+                                }
+                            }
+
+                            state_changed_tx.send(()).ok();
                         }
                         Err(e) => {
                             warn!("[detection] analysis failed: {e}");

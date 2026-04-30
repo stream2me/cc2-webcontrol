@@ -9,7 +9,7 @@ use super::client_raw::MqttRawClient;
 use super::client_ws::MqttWsClient;
 use super::commands::{Command, PendingRpcs};
 use super::models::{
-    METHOD_GET_AMS_INFO, METHOD_GET_PRINT_HISTORY,
+    METHOD_GET_AMS_INFO, METHOD_GET_FILE_THUMBNAIL, METHOD_GET_PRINT_HISTORY,
     METHOD_PAUSE_PRINT, METHOD_RESUME_PRINT, METHOD_SET_FAN, METHOD_SET_LED,
     METHOD_SET_SPEED_MODE, METHOD_START_PRINT, METHOD_STOP_PRINT,
 };
@@ -33,9 +33,9 @@ pub struct PrinterManager {
     raw_cmd_tx: broadcast::Sender<Command>,
     state_changed_tx: broadcast::Sender<()>,
 
-    /// Pending RPC calls waiting for a printer response by id.
+    /// pending RPCs
     pending_rpcs: PendingRpcs,
-    /// Monotonic counter for RPC IDs (starts high to avoid collision with client-local sequences).
+    /// monotonic RPC id
     rpc_id_seq: Arc<AtomicU64>,
 
     printer_id: String,
@@ -104,7 +104,7 @@ impl PrinterManager {
         self.raw_shutdown = Some(raw_shutdown_tx);
         self.ws_shutdown = Some(ws_shutdown_tx);
 
-        // Watcher task: keeps PrinterState.connected in sync with both connections.
+        // connection watcher
         {
             let state = self.state.clone();
             let state_changed_tx = self.state_changed_tx.clone();
@@ -129,7 +129,7 @@ impl PrinterManager {
             });
         }
 
-        // Raw MQTT client (port 1883)
+        // raw client
         {
             let state = self.state.clone();
             let connected_tx = self.raw_connected_tx.clone();
@@ -180,7 +180,7 @@ impl PrinterManager {
             });
         }
 
-        // WebSocket MQTT client (port 9001)
+        // ws client
         {
             let state = self.state.clone();
             let connected_tx = self.ws_connected_tx.clone();
@@ -421,6 +421,15 @@ impl PrinterManager {
     pub async fn get_print_history(&self) -> Result<serde_json::Value, PrinterError> {
         info!("[cmd] get_print_history");
         self.rpc_call(METHOD_GET_PRINT_HISTORY, None, 10).await
+    }
+
+    pub async fn get_file_thumbnail(&self, storage_media: &str, file_name: &str) -> Result<serde_json::Value, PrinterError> {
+        info!("[cmd] get_file_thumbnail filename={file_name}");
+        self.rpc_call(
+            METHOD_GET_FILE_THUMBNAIL,
+            Some(serde_json::json!({ "storage_media": storage_media, "file_name": file_name })),
+            10,
+        ).await
     }
 
     pub async fn canvas_refresh(&self) -> Result<serde_json::Value, PrinterError> {

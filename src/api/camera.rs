@@ -5,8 +5,7 @@ use axum::response::{IntoResponse, Response};
 
 use super::router::AppState;
 
-/// latest JPEG frame from shared frame buffer
-/// returns 503 if no frame yet
+/// latest jpeg frame
 pub async fn snapshot(State(state): State<AppState>) -> Response<Body> {
     let frame = state.frame_buffer.read().await.clone();
 

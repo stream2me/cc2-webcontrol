@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { printer, detection, showToast } from '../stores';
   import type { DetectionPoint } from '../stores';
-  import { toggleDetection, getDetectionStatus } from '../api';
+  import { toggleDetection, getDetectionStatus, getDetectionHistory } from '../api';
   import { toErrorMessage } from './errors';
   import Modal from './Modal.svelte';
   import { fly, fade } from 'svelte/transition';
@@ -32,6 +32,7 @@
   })();
 
   $: showCleanBanner = isPrinting && history.length === 0;
+  $: showNoDataBanner = !isPrinting && history.length === 0;
   $: peak = history.length ? Math.max(...history.map(p => p.score)) : 0;
 
   $: scoreColor = score >= pauseT ? 'var(--danger)'
@@ -45,26 +46,51 @@
   const PT = 10;
   const PB = 8;
   const PH = GH - PT - PB;
+  // max gap before compression kicks in (30 min)
+  const MAX_GAP_SECS = 1800;
+  // gap exceeding this gets a break marker
+  const BREAK_GAP_SECS = 600;
 
-  function mapX(i: number, n: number): number {
-    if (n <= 1) return gWidth / 2;
-    return (i / (n - 1)) * gWidth;
-  }
   function mapY(v: number): number {
     return PT + (1 - Math.max(0, Math.min(1, v))) * PH;
   }
 
-  function linePath(pts: DetectionPoint[]): string {
-    if (pts.length < 2) return '';
-    return pts.map((p, i) =>
-      `${i === 0 ? 'M' : 'L'} ${mapX(i, pts.length).toFixed(1)},${mapY(p.score).toFixed(1)}`
-    ).join(' ');
+  function computeXPositions(pts: DetectionPoint[], width: number): number[] {
+    if (pts.length === 0) return [];
+    if (pts.length === 1) return [width / 2];
+    const gaps = pts.slice(1).map((p, i) => Math.min(p.ts - pts[i].ts, MAX_GAP_SECS));
+    const total = gaps.reduce((a, b) => a + b, 0);
+    if (total === 0) return pts.map((_, i) => (i / (pts.length - 1)) * width);
+    const pos: number[] = [0];
+    for (const g of gaps) pos.push(pos[pos.length - 1] + (g / total) * width);
+    return pos;
   }
 
-  function areaPath(pts: DetectionPoint[]): string {
-    if (pts.length < 2) return '';
-    const lx = mapX(pts.length - 1, pts.length).toFixed(1);
-    return `${linePath(pts)} L ${lx},${GH} L 0,${GH} Z`;
+  $: xPositions = computeXPositions(history, gWidth);
+
+  $: gapBreaks = (() => {
+    if (history.length < 2 || xPositions.length < 2) return [] as number[];
+    const out: number[] = [];
+    for (let i = 1; i < history.length; i++) {
+      if (history[i].ts - history[i - 1].ts > BREAK_GAP_SECS) {
+        out.push((xPositions[i - 1] + xPositions[i]) / 2);
+      }
+    }
+    return out;
+  })();
+
+  function linePath(pts: DetectionPoint[], xs: number[]): string {
+    if (pts.length < 2 || xs.length < 2) return '';
+    return pts
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xs[i].toFixed(1)},${mapY(p.score).toFixed(1)}`)
+      .join(' ');
+  }
+
+  function areaPath(pts: DetectionPoint[], xs: number[]): string {
+    if (pts.length < 2 || xs.length < 2) return '';
+    const line = linePath(pts, xs);
+    const lx = xs[xs.length - 1].toFixed(1);
+    return `${line} L ${lx},${GH} L 0,${GH} Z`;
   }
 
   function dotColor(s: number): string {
@@ -73,6 +99,9 @@
 
   function fmtTime(ts: number): string {
     return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  function fmtTimeCpt(ts: number): string {
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   }
   function fmtDateTime(ts: number): string {
     const d = new Date(ts * 1000);
@@ -98,6 +127,17 @@
 
   onMount(async () => {
     try { const s = await getDetectionStatus(); detection.set(s); } catch (e) { showToast(toErrorMessage(e) || 'Failed to load detection status', 'error'); }
+    try {
+      const hist = await getDetectionHistory(undefined, 200);
+      if (hist.length > 0) {
+        printer.update(s => ({
+          ...s,
+          detection_history: s.detection_history.length > 0 ? s.detection_history : hist,
+        }));
+      }
+    } catch {
+      // ws fills history
+    }
   });
 </script>
 
@@ -151,6 +191,14 @@
               </svg>
               No Print Failure detected so far.
             </div>
+          {:else if showNoDataBanner}
+            <div class="clean-banner muted" in:fade={{ duration: 200 }}>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                <path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+              No detection data yet.
+            </div>
           {:else}
             <div class="graph-wrap" bind:clientWidth={gWidth}>
               {#if gWidth > 0}
@@ -182,13 +230,21 @@
 
                   {#if history.length >= 2}
                     {@const lineCol = peak >= pauseT ? 'var(--danger)' : peak >= notifyT ? 'var(--warning)' : 'var(--success)'}
-                    <path d={areaPath(history)} fill={lineCol} opacity="0.08"/>
-                    <path d={linePath(history)} fill="none" stroke={lineCol}
+                    <path d={areaPath(history, xPositions)} fill={lineCol} opacity="0.08"/>
+                    <path d={linePath(history, xPositions)} fill="none" stroke={lineCol}
                       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   {/if}
 
+                  {#each gapBreaks as bx}
+                    <line x1={bx} y1={PT + 2} x2={bx} y2={GH - PB - 2}
+                      stroke="var(--border2)" stroke-width="0.8"
+                      stroke-dasharray="2 2" opacity="0.55"/>
+                    <text x={bx} y={GH - 1}
+                      font-size="7" fill="var(--muted2)" text-anchor="middle" opacity="0.65">···</text>
+                  {/each}
+
                   {#each history as pt, i}
-                    {@const cx = mapX(i, history.length)}
+                    {@const cx = xPositions[i] ?? gWidth / 2}
                     {@const cy = mapY(pt.score)}
                     {@const dc = dotColor(pt.score)}
                     <circle
@@ -203,29 +259,17 @@
                     />
                     <circle cx={cx} cy={cy} r="3.5" fill={dc} stroke="var(--surface)" stroke-width="1.5" pointer-events="none"/>
                   {/each}
-
-                  {#if history.length === 1}
-                    {@const cx = mapX(0, 1)}
-                    {@const cy = mapY(history[0].score)}
-                    {@const dc = dotColor(history[0].score)}
-                    <circle cx={cx} cy={cy} r="8" fill="transparent"
-                      style="cursor:{history[0].snapshot ? 'pointer' : 'default'}"
-                      on:mouseenter={(e) => handleDotEnter(e, history[0])}
-                      on:mouseleave={handleDotLeave}
-                      on:click={() => handleDotClick(history[0])}
-                      on:keydown={(e) => e.key === 'Enter' && handleDotClick(history[0])}
-                      role="button" tabindex="0" aria-label="Detection {(history[0].score*100).toFixed(0)}%"
-                    />
-                    <circle cx={cx} cy={cy} r="3.5" fill={dc} stroke="var(--surface)" stroke-width="1.5" pointer-events="none"/>
-                  {/if}
                 </svg>
               {/if}
             </div>
             {#if history.length > 0}
               <div class="graph-footer">
                 <span class="gf-count">
-                  {history.length} detection{history.length !== 1 ? 's' : ''}
-                  {#if isPrinting && currentFile}<span class="gf-muted"> this print</span>{/if}
+                  {history.length} pt{history.length !== 1 ? 's' : ''}
+                  {#if history.length >= 2}
+                    <span class="gf-sep">·</span>
+                    <span class="gf-range">{fmtTimeCpt(history[0].ts)}–{fmtTimeCpt(history[history.length - 1].ts)}</span>
+                  {/if}
                 </span>
                 <span class="gf-peak" style="color:{peak >= pauseT ? 'var(--danger)' : peak >= notifyT ? 'var(--warning)' : 'var(--text2)'}">
                   Peak {(peak * 100).toFixed(0)}%
@@ -373,7 +417,7 @@
   }
   .chevron.up { transform: rotate(-180deg); }
 
-  /* Toggle */
+  /* toggle */
   .toggle-wrap { display: flex; }
   .toggle { position: relative; display: block; width: 36px; height: 20px; cursor: pointer; }
   .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -398,10 +442,10 @@
   }
   input:checked + .knob::before { transform: translateX(16px); background: var(--text); }
 
-  /* Body */
+  /* body */
   .body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
 
-  /* Score strip */
+  /* score strip */
   .score-strip {
     display: flex;
     align-items: center;
@@ -451,7 +495,7 @@
   .thr-notify .thr-dot { background: var(--warning); }
   .thr-pause .thr-dot { background: var(--danger); }
 
-  /* Graph */
+  /* graph */
   .graph-outer {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -469,6 +513,7 @@
     font-weight: 500;
     color: var(--success);
   }
+  .clean-banner.muted { color: var(--muted); }
 
   .graph-wrap { position: relative; }
   .graph-svg { display: block; }
@@ -482,8 +527,9 @@
     font-size: 10.5px;
     color: var(--muted);
   }
-  .gf-count { display: flex; align-items: center; gap: 3px; }
-  .gf-muted { color: var(--muted2); }
+  .gf-count { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .gf-sep { color: var(--muted2); }
+  .gf-range { color: var(--muted2); font-family: var(--font-mono); font-size: 10px; }
   .gf-peak { font-weight: 600; font-family: var(--font-mono); }
 
   .disabled-msg {
@@ -494,7 +540,7 @@
     font-style: italic;
   }
 
-  /* Tooltip */
+  /* tooltip */
   .g-tooltip {
     position: fixed;
     z-index: 9999;
@@ -524,7 +570,7 @@
     text-align: center;
   }
 
-  /* Modal */
+  /* modal */
   .det-modal {
     background: var(--surface);
     border: 1px solid var(--border2);

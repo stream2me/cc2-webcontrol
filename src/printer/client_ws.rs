@@ -111,8 +111,7 @@ impl MqttWsClient {
         )
         .await?;
 
-        // The printer firmware requires registration before it will process commands
-        // or send api_response messages. Without it, publishes are ACKed but silently ignored.
+        // ws register gate
         let reg_payload = serde_json::json!({
             "client_id": client_id,
             "request_id": format!("{client_id}_req"),
@@ -283,7 +282,7 @@ impl MqttWsClient {
             }
         } else if topic == api_response_topic {
             let Ok(resp) = serde_json::from_slice::<RpcResponse>(payload) else { return };
-            // Resolve any manager-level RPC call waiting on this id
+            // resolve pending RPC
             if resp.id > 0 {
                 if let Some(tx) = pending_rpcs.lock().await.remove(&resp.id) {
                     tx.send(resp.result.data.clone()).ok();
@@ -297,11 +296,9 @@ impl MqttWsClient {
                 }
             } else if resp.method == METHOD_GET_FILE_LIST && resp.result.error_code == 0 {
                 if let Some(arr) = resp.result.data.get("file_list").and_then(|v| v.as_array()) {
-                    let storage = resp.result.data.get("storage_media").and_then(|v| v.as_str()).unwrap_or("local");
-                    tracing::debug!("[ws] 1044 file list ({storage}): {} files", arr.len());
+                    info!("[ws] file list loaded: {} files", arr.len());
                     state.write().await.files = arr.clone();
                     state_changed_tx.send(()).ok();
-                    info!("[ws] file list loaded: {} files", arr.len());
                 }
             } else if resp.method == METHOD_GET_AMS_INFO && resp.result.error_code == 0 {
                 if let Some(canvas) = resp.result.data.get("canvas_info") {
@@ -412,7 +409,7 @@ impl MqttOverWs {
         let packet_type = (data[0] >> 4) & 0x0F;
         match packet_type {
             2 => {
-                // CONNACK: fixed header(1) + remaining_len(1) + session_present(1) + return_code(1)
+                // CONNACK
                 if data.len() < 4 {
                     warn!("[ws] CONNACK too short ({} bytes)", data.len());
                     return None;
@@ -420,12 +417,12 @@ impl MqttOverWs {
                 Some(WsPacket::ConnAck(data[3]))
             }
             3 => {
-                // PUBLISH: fixed header(1) + remaining_len(1-4) + topic_len(2) + topic + [packet_id(2)] + payload
+                // PUBLISH
                 let mut pos = 1usize;
                 let (remaining, br) = decode_remaining_len(data.get(pos..)?)?;
                 pos += br;
 
-                // Sanity check: remaining length must not exceed actual data
+                // bounds check
                 if pos.saturating_add(remaining) > data.len() {
                     warn!("[ws] PUBLISH remaining_len={remaining} exceeds packet size={}", data.len());
                     return None;
@@ -445,7 +442,7 @@ impl MqttOverWs {
                 let topic = String::from_utf8_lossy(&data[pos..pos + topic_len]).to_string();
                 pos += topic_len;
 
-                // QoS 1/2: skip the 2-byte packet identifier that follows the topic
+                // qos packet id
                 let qos = (data[0] >> 1) & 0x03;
                 if qos > 0 {
                     if pos + 2 > data.len() {
@@ -471,16 +468,16 @@ fn encode_connect(client_id: &str, username: &str, password: &str) -> Vec<u8> {
     let cid = client_id.as_bytes();
     let uname = username.as_bytes();
     let pwd = password.as_bytes();
-    // variable header (10) + length-prefixed client_id, username, password
+    // CONNECT remaining
     let remaining = 10 + 2 + cid.len() + 2 + uname.len() + 2 + pwd.len();
 
-    let mut buf = vec![0x10]; // CONNECT fixed header
+    let mut buf = vec![0x10]; // CONNECT hdr
     buf.extend_from_slice(&encode_remaining_len(remaining));
     buf.extend_from_slice(&[0x00, 0x04]);
     buf.extend_from_slice(b"MQTT");
-    buf.push(0x04); // protocol level 3.1.1
-    buf.push(0xC2); // connect flags: username + password + clean session
-    buf.extend_from_slice(&[0x00, 0x3C]); // keep-alive: 60s
+    buf.push(0x04); // proto 3.1.1
+    buf.push(0xC2); // user+pass+clean
+    buf.extend_from_slice(&[0x00, 0x3C]); // keepalive 60s
     buf.extend_from_slice(&(cid.len() as u16).to_be_bytes());
     buf.extend_from_slice(cid);
     buf.extend_from_slice(&(uname.len() as u16).to_be_bytes());
@@ -492,7 +489,7 @@ fn encode_connect(client_id: &str, username: &str, password: &str) -> Vec<u8> {
 
 fn encode_subscribe(packet_id: u16, topics: &[(&str, u8)]) -> Vec<u8> {
     let remaining = 2 + topics.iter().map(|(t, _)| 2 + t.len() + 1).sum::<usize>();
-    let mut buf = vec![0x82]; // SUBSCRIBE fixed header
+    let mut buf = vec![0x82]; // SUBSCRIBE hdr
     buf.extend_from_slice(&encode_remaining_len(remaining));
     buf.extend_from_slice(&packet_id.to_be_bytes());
     for (topic, qos) in topics {

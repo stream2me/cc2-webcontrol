@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fly } from 'svelte/transition';
+  import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import Modal from '../Modal.svelte';
   import ConfirmModal from '../ConfirmModal.svelte';
   import {
     runDetection, cameraSnapshotUrl, listSnapshots, deleteAllSnapshots, deleteSnapshot, snapshotUrl,
-    type RunDetectionResult, type SnapshotEntry,
+    getDetectionGrouped,
+    type RunDetectionResult, type DetectionGroup, type GroupSnapshot,
   } from '../../api';
   import { toErrorMessage } from '../errors';
 
@@ -18,13 +19,25 @@
     confirmation_frames: number;
   };
 
-  let snapshots: SnapshotEntry[] = [];
+  interface LightboxItem {
+    filename: string;
+    score_pct: number | null;
+    mtime: number;
+    size: number;
+    boxes: Array<{ x1: number; y1: number; x2: number; y2: number; confidence: number }>;
+  }
+
+  let groups: DetectionGroup[] = [];
   let snapshotTotal = 0;
   let snapshotTotalBytes = 0;
   let snapshotsLoading = false;
   let purgeConfirmOpen = false;
   let purging = false;
-  let snapLightbox: SnapshotEntry | null = null;
+
+  // stack viewer
+  let stackViewerGroup: DetectionGroup | null = null;
+  // full lightbox (shared by direct + stack)
+  let snapLightbox: LightboxItem | null = null;
 
   let detTestOpen = false;
   let detTestRunning = false;
@@ -32,17 +45,20 @@
   let detTestError = '';
   let detTestFrameUrl = '';
 
-  onMount(() => { loadSnapshots(); });
+  onMount(() => { loadGroups(); });
 
-  async function loadSnapshots() {
+  async function loadGroups() {
     snapshotsLoading = true;
     try {
-      const res = await listSnapshots(0, 50);
-      snapshots = res.snapshots;
-      snapshotTotal = res.total;
-      snapshotTotalBytes = res.total_bytes;
+      const [stats, allGroups] = await Promise.all([
+        listSnapshots(0, 0),
+        getDetectionGrouped(undefined, 500),
+      ]);
+      snapshotTotal = stats.total;
+      snapshotTotalBytes = stats.total_bytes;
+      groups = allGroups.filter((g) => g.snapshots.length > 0);
     } catch {
-      snapshots = [];
+      groups = [];
     } finally {
       snapshotsLoading = false;
     }
@@ -52,7 +68,7 @@
     purging = true;
     try {
       await deleteAllSnapshots();
-      snapshots = [];
+      groups = [];
       snapshotTotal = 0;
       snapshotTotalBytes = 0;
     } catch {
@@ -62,10 +78,22 @@
     }
   }
 
-  async function doDeleteSnapshot(filename: string) {
-    await deleteSnapshot(filename);
-    snapshots = snapshots.filter((s) => s.filename !== filename);
-    snapshotTotal = Math.max(0, snapshotTotal - 1);
+  async function doDeleteGroup(group: DetectionGroup) {
+    const filenames = group.snapshots.map((s) => s.filename);
+    await Promise.allSettled(filenames.map((f) => deleteSnapshot(f)));
+    groups = groups.filter((g) => g !== group);
+    snapshotTotal = Math.max(0, snapshotTotal - filenames.length);
+    if (stackViewerGroup === group) stackViewerGroup = null;
+  }
+
+  function openGroupLightbox(gs: GroupSnapshot) {
+    snapLightbox = {
+      filename: gs.filename,
+      score_pct: Math.round(gs.score * 100),
+      mtime: gs.ts,
+      size: 0,
+      boxes: gs.boxes,
+    };
   }
 
   function openDetTest() {
@@ -99,6 +127,20 @@
     const d = new Date(ts * 1000);
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
       d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+
+  function formatTimeRange(tsFirst: number, tsLast: number): string {
+    if (tsFirst === tsLast) return formatSnapDate(tsLast);
+    const f = new Date(tsFirst * 1000);
+    const l = new Date(tsLast * 1000);
+    const sameDay = f.toDateString() === l.toDateString();
+    if (sameDay) {
+      const day = f.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const t1 = f.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+      const t2 = l.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+      return `${day} · ${t1}–${t2}`;
+    }
+    return `${formatSnapDate(tsFirst)} – ${formatSnapDate(tsLast)}`;
   }
 </script>
 
@@ -171,13 +213,19 @@
       <div class="snaps-meta">
         {#if snapshotsLoading}
           <span class="muted-text">Loading…</span>
+        {:else if groups.length > 0}
+          <span class="muted-text">
+            {groups.length} cluster{groups.length !== 1 ? 's' : ''}
+            · {snapshotTotal} snapshot{snapshotTotal !== 1 ? 's' : ''}
+            {#if snapshotTotalBytes > 0} · {formatBytes(snapshotTotalBytes)}{/if}
+          </span>
         {:else}
-          <span class="muted-text">{snapshotTotal} snapshot{snapshotTotal !== 1 ? 's' : ''} · {formatBytes(snapshotTotalBytes)}</span>
+          <span class="muted-text">{snapshotTotal} snapshot{snapshotTotal !== 1 ? 's' : ''}{snapshotTotalBytes > 0 ? ' · ' + formatBytes(snapshotTotalBytes) : ''}</span>
         {/if}
       </div>
     </div>
     <div class="snaps-acts">
-      <button class="icon-btn" on:click={loadSnapshots} disabled={snapshotsLoading} title="Refresh">
+      <button class="icon-btn" on:click={loadGroups} disabled={snapshotsLoading} title="Refresh">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" class:spin={snapshotsLoading}>
           <path d="M13.5 4.5A6 6 0 1 0 14 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
           <path d="M10 4.5h3.5V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -194,29 +242,43 @@
     </div>
   </div>
 
-  {#if !snapshotsLoading && snapshots.length === 0}
+  {#if !snapshotsLoading && groups.length === 0}
     <div class="snaps-empty">No detection snapshots yet.</div>
-  {:else}
+  {:else if !snapshotsLoading}
     <div class="snaps-grid">
-      {#each snapshots as snap}
-        <div class="snap-card" on:click={() => (snapLightbox = snap)} role="button" tabindex="0"
-          on:keydown={(e) => e.key === 'Enter' && (snapLightbox = snap)}>
+      {#each groups as group (group.ts_last)}
+        <div
+          class="snap-card"
+          role="button" tabindex="0"
+          on:click={() => { if (group.count > 1) stackViewerGroup = group; else openGroupLightbox(group.snapshots[0]); }}
+          on:keydown={(e) => e.key === 'Enter' && (group.count > 1 ? (stackViewerGroup = group) : openGroupLightbox(group.snapshots[0]))}
+        >
           <div class="snap-thumb-wrap">
-            <img src={snapshotUrl(snap.filename)} alt="Detection snapshot" class="snap-thumb" loading="lazy" />
-            {#if snap.score_pct !== null}
-              <span class="snap-score" class:high={snap.score_pct >= 50}>{snap.score_pct}%</span>
+            <img src={snapshotUrl(group.snapshots[0].filename)} alt="Detection snapshot" class="snap-thumb" loading="lazy" />
+
+            {#if group.count > 1}
+              <span class="snap-stack-badge" in:fade={{ duration: 150 }}>×{group.count}</span>
             {/if}
-            <button class="snap-del-btn" on:click|stopPropagation={() => doDeleteSnapshot(snap.filename)} title="Delete this snapshot">
-              <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M4.5 3.5V2.5h5v1M5.5 6v4.5M8.5 6v4.5M3 3.5l.8 8h6.4l.8-8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+
+            <span class="snap-score" class:high={group.score_max >= 0.5}>
+              {Math.round(group.score_max * 100)}%
+            </span>
+
+            <button
+              class="snap-del-btn"
+              on:click|stopPropagation={() => doDeleteGroup(group)}
+              title="Delete {group.count > 1 ? 'all ' + group.count + ' snapshots' : 'snapshot'}"
+            >
+              <svg width="11" height="11" viewBox="0 0 14 14" fill="none">
+                <path d="M2 3.5h10M4.5 3.5V2.5h5v1M5.5 6v4.5M8.5 6v4.5M3 3.5l.8 8h6.4l.8-8"
+                  stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             </button>
           </div>
-          <div class="snap-info">{formatSnapDate(snap.mtime)}</div>
+          <div class="snap-info">{formatSnapDate(group.ts_last)}</div>
         </div>
       {/each}
     </div>
-    {#if snapshotTotal > snapshots.length}
-      <div class="snaps-more">Showing {snapshots.length} of {snapshotTotal}</div>
-    {/if}
   {/if}
 </div>
 
@@ -289,8 +351,69 @@
   </svelte:fragment>
 </ConfirmModal>
 
+{#if stackViewerGroup}
+  <Modal open={true} onClose={() => (stackViewerGroup = null)} zIndex={120}>
+    <div class="stack-modal" role="dialog" aria-modal="true" in:fly={{ y: 8, duration: 200, easing: cubicOut }}>
+      <div class="stack-head">
+        <div class="stack-head-info">
+          <span class="stack-title">Detection cluster</span>
+          <div class="stack-meta-row">
+            <span class="stack-count-pill">{stackViewerGroup.count} snapshot{stackViewerGroup.count !== 1 ? 's' : ''}</span>
+            <span class="stack-score-range">
+              {Math.round(stackViewerGroup.score_min * 100)}%–{Math.round(stackViewerGroup.score_max * 100)}%
+            </span>
+            {#if stackViewerGroup.representative.print_filename}
+              <span class="stack-filename"
+                title={stackViewerGroup.representative.print_filename}>
+                {stackViewerGroup.representative.print_filename.replace(/\.gcode$/i, '')}
+              </span>
+            {/if}
+          </div>
+          <div class="stack-time-range">{formatTimeRange(stackViewerGroup.ts_first, stackViewerGroup.ts_last)}</div>
+        </div>
+        <button class="modal-close" on:click={() => (stackViewerGroup = null)} aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 3l8 8M11 3L3 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="stack-snaps-grid">
+        {#each stackViewerGroup.snapshots as gs}
+          <div
+            class="stack-snap"
+            role="button" tabindex="0"
+            on:click={() => openGroupLightbox(gs)}
+            on:keydown={(e) => e.key === 'Enter' && openGroupLightbox(gs)}
+          >
+            <div class="stack-snap-thumb-wrap">
+              <img src={snapshotUrl(gs.filename)} alt="Detection" class="stack-snap-thumb" loading="lazy" />
+              <span class="stack-snap-score" class:high={gs.score >= 0.5}>
+                {Math.round(gs.score * 100)}%
+              </span>
+            </div>
+            <div class="stack-snap-time">
+              {new Date(gs.ts * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      <div class="stack-footer">
+        <span class="stack-hint">Click a snapshot to view full size</span>
+        <button class="btn xs danger" on:click={() => stackViewerGroup && doDeleteGroup(stackViewerGroup)}>
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path d="M3 4h10M6.5 4V2.5h3V4M5 4l.5 9h5l.5-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Delete cluster
+        </button>
+      </div>
+    </div>
+  </Modal>
+{/if}
+
 {#if snapLightbox}
-  <Modal open={true} onClose={() => (snapLightbox = null)} zIndex={120}>
+  <Modal open={true} onClose={() => (snapLightbox = null)} zIndex={130}>
     <div class="snap-lb" role="dialog" aria-modal="true" in:fly={{ y: 8, duration: 200, easing: cubicOut }}>
       <div class="snap-lb-head">
         <div class="snap-lb-meta">
@@ -298,7 +421,9 @@
             <span class="snap-lb-score" class:danger={snapLightbox.score_pct >= 50}>{snapLightbox.score_pct}%</span>
           {/if}
           <span class="snap-lb-date">{formatSnapDate(snapLightbox.mtime)}</span>
-          <span class="snap-lb-size">{formatBytes(snapLightbox.size)}</span>
+          {#if snapLightbox.size > 0}
+            <span class="snap-lb-size">{formatBytes(snapLightbox.size)}</span>
+          {/if}
         </div>
         <button class="modal-close" on:click={() => (snapLightbox = null)} aria-label="Close">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -423,6 +548,13 @@
     background: rgba(0,0,0,0.65); color: var(--warning); font-variant-numeric: tabular-nums;
   }
   .snap-score.high { color: var(--danger); }
+  .snap-stack-badge {
+    position: absolute; top: 4px; left: 4px;
+    font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+    background: rgba(0,0,0,0.7); color: var(--accent);
+    border: 1px solid rgba(45,135,240,0.4);
+    font-variant-numeric: tabular-nums; line-height: 1.4;
+  }
   .snap-del-btn {
     position: absolute; top: 4px; right: 4px;
     width: 20px; height: 20px;
@@ -432,13 +564,75 @@
   }
   .snap-del-btn:hover { background: var(--danger); }
   .snap-thumb-wrap:hover .snap-del-btn { display: inline-flex; }
+  /* hide stack badge on hover to avoid overlap with del button */
+  .snap-thumb-wrap:hover .snap-stack-badge { opacity: 0; }
   .snap-info { font-size: 10px; color: var(--muted2); text-align: center; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .snaps-more { padding: 8px 14px; font-size: 11px; color: var(--muted2); border-top: 1px solid var(--border); text-align: center; }
+
+  /* stack viewer modal */
+  .stack-modal {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    width: min(520px, calc(100vw - 32px));
+    box-shadow: 0 24px 80px rgba(0,0,0,0.65);
+    overflow: hidden;
+  }
+  .stack-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 13px 15px 12px; border-bottom: 1px solid var(--border); gap: 8px;
+  }
+  .stack-head-info { flex: 1; min-width: 0; }
+  .stack-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .stack-meta-row { display: flex; align-items: center; gap: 7px; margin-top: 5px; flex-wrap: wrap; }
+  .stack-count-pill {
+    font-size: 10.5px; font-weight: 600;
+    padding: 1px 7px; border-radius: var(--radius-pill);
+    background: var(--accent-dim); color: var(--accent);
+    border: 1px solid rgba(45,135,240,0.3);
+  }
+  .stack-score-range {
+    font-size: 11px; font-weight: 700; font-family: var(--font-mono);
+    color: var(--warning);
+  }
+  .stack-filename {
+    font-size: 10.5px; color: var(--muted2); font-family: var(--font-mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px;
+  }
+  .stack-time-range { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .stack-snaps-grid {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 12px 14px; max-height: 340px; overflow-y: auto;
+  }
+  .stack-snap {
+    display: flex; flex-direction: column; gap: 3px;
+    cursor: pointer; width: 100px; flex-shrink: 0;
+  }
+  .stack-snap:focus { outline: none; }
+  .stack-snap:focus .stack-snap-thumb-wrap { border-color: var(--accent); }
+  .stack-snap-thumb-wrap {
+    position: relative; border-radius: 4px; overflow: hidden;
+    background: var(--bg-deep); border: 1px solid var(--border); aspect-ratio: 4/3;
+    transition: border-color 0.15s;
+  }
+  .stack-snap:hover .stack-snap-thumb-wrap { border-color: var(--border2); }
+  .stack-snap-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .stack-snap-score {
+    position: absolute; bottom: 3px; right: 3px;
+    font-size: 9.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px;
+    background: rgba(0,0,0,0.65); color: var(--warning); font-variant-numeric: tabular-nums;
+  }
+  .stack-snap-score.high { color: var(--danger); }
+  .stack-snap-time { font-size: 9.5px; color: var(--muted2); text-align: center; }
+  .stack-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-top: 1px solid var(--border); background: var(--surface2);
+  }
+  .stack-hint { font-size: 11px; color: var(--muted2); }
 
   .btn.xs { font-size: 10.5px; padding: 3px 8px; border-radius: var(--radius-sm); }
   .btn.danger { color: var(--danger); border-color: rgba(192,57,74,0.4); background: var(--danger-dim); }
 
-  /* Detection test modal */
+  /* test modal */
   .det-sheet { width: min(640px, calc(100vw - 40px)); border-radius: 12px; border: 1px solid var(--border2); box-shadow: 0 24px 80px -20px rgba(0,0,0,0.65), 0 4px 14px rgba(0,0,0,0.3); }
   .det-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
   .det-frame-wrap { position: relative; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-deep); border: 1px solid var(--border); }
@@ -453,7 +647,7 @@
 
   .spinner.sm { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
 
-  /* Lightbox */
+  /* lightbox */
   .snap-lb { background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; width: min(520px, calc(100vw - 32px)); box-shadow: 0 24px 80px rgba(0,0,0,0.65); overflow: hidden; }
   .snap-lb-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--border); gap: 8px; }
   .snap-lb-meta { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }

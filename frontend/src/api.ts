@@ -1,4 +1,4 @@
-import type { DetectionStatus } from './stores';
+import type { DetectionStatus, DetectionPoint } from './stores';
 
 const BASE = '';
 
@@ -262,6 +262,13 @@ export async function refreshCanvas(): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+export async function getThumbnail(filename: string, storage = 'local'): Promise<{ thumbnail: string }> {
+  const u = `${BASE}/api/printer/thumbnail?storage=${encodeURIComponent(storage)}&filename=${encodeURIComponent(filename)}`;
+  const res = await fetch(u);
+  if (!res.ok) await apiError(res, 'Failed to get thumbnail');
+  return res.json();
+}
+
 
 export async function getDetectionStatus(): Promise<DetectionStatus> {
   const res = await fetch(`${BASE}/api/detection/status`);
@@ -303,6 +310,16 @@ export interface LatestDetection {
 export async function getLatestDetection(): Promise<LatestDetection> {
   const res = await fetch(`${BASE}/api/detection/latest`);
   if (!res.ok) await apiError(res, 'Failed to get latest detection');
+  return res.json();
+}
+
+export async function getDetectionHistory(filename?: string, limit?: number): Promise<DetectionPoint[]> {
+  const params = new URLSearchParams();
+  if (filename) params.set('filename', filename);
+  if (limit != null) params.set('limit', limit.toString());
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/detection/history${qs ? '?' + qs : ''}`);
+  if (!res.ok) await apiError(res, 'Failed to get detection history');
   return res.json();
 }
 
@@ -435,6 +452,23 @@ export interface SnapshotEntry {
   boxes: Array<{ x1: number; y1: number; x2: number; y2: number; confidence: number }>;
 }
 
+export interface GroupSnapshot {
+  ts: number;
+  score: number;
+  filename: string;
+  boxes: Array<{ x1: number; y1: number; x2: number; y2: number; confidence: number }>;
+}
+
+export interface DetectionGroup {
+  representative: DetectionPoint;
+  count: number;
+  ts_first: number;
+  ts_last: number;
+  score_max: number;
+  score_min: number;
+  snapshots: GroupSnapshot[];
+}
+
 export interface SnapshotListResponse {
   snapshots: SnapshotEntry[];
   total: number;
@@ -450,6 +484,21 @@ export async function listSnapshots(offset = 0, limit = 50): Promise<SnapshotLis
 export async function deleteAllSnapshots(): Promise<void> {
   const res = await fetch(`${BASE}/api/snapshots`, { method: 'DELETE' });
   if (!res.ok) await apiError(res, 'Failed to delete snapshots');
+}
+
+export async function getDetectionGrouped(
+  filename?: string,
+  limit?: number,
+  windowSecs?: number,
+): Promise<DetectionGroup[]> {
+  const params = new URLSearchParams();
+  if (filename) params.set('filename', filename);
+  if (limit != null) params.set('limit', limit.toString());
+  if (windowSecs != null) params.set('window_secs', windowSecs.toString());
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/detection/grouped${qs ? '?' + qs : ''}`);
+  if (!res.ok) await apiError(res, 'Failed to get detection groups');
+  return res.json();
 }
 
 export function snapshotUrl(filename: string): string {
