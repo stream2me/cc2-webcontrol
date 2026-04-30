@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { Lightbulb } from 'lucide-svelte';
   import { printer } from '../stores';
   import { setLed, setFan, setSpeedMode } from '../api';
   import { toErrorMessage } from './errors';
 
   $: s = $printer.state;
-  $: ledOn = s?.led?.status === 1;
+  $: ledOn      = s?.led?.status === 1;
   $: fanSpeed    = s?.fans?.fan?.speed ?? 0;
   $: auxFanSpeed = s?.fans?.aux_fan?.speed ?? 0;
   $: boxFanSpeed = s?.fans?.box_fan?.speed ?? 0;
@@ -20,14 +21,6 @@
     { val: 3, label: 'Ludicrous' },
   ];
 
-<<<<<<< Updated upstream
-  function fanToPercent(speed: number): number { return Math.round((speed / 255) * 100); }
-  function percentToFan(pct: number): number { return Math.round((pct / 100) * 255); }
-  function isFanOn(rawSpeed: number): boolean { return rawSpeed > 0; }
-  async function stepFan(name: string, rawSpeed: number, delta: number) {
-    const pct = Math.min(100, Math.max(0, fanToPercent(rawSpeed) + delta));
-    await handleFan(name, percentToFan(pct));
-=======
   let pending: Record<string, number> = {};
   let timers: Record<string, ReturnType<typeof setTimeout>> = {};
   let ledPending: boolean | null = null;
@@ -40,9 +33,7 @@
   function queueFan(name: string, pct: number) {
     clearTimeout(timers[name]);
     error = '';
-
     pending = { ...pending, [name]: pct };
-
     timers[name] = setTimeout(async () => {
       try {
         await setFan(name, percentToFan(pct));
@@ -53,24 +44,40 @@
         pending = rest;
       }
     }, 350);
->>>>>>> Stashed changes
   }
-  async function toggleFan(name: string, rawSpeed: number) {
-    await handleFan(name, rawSpeed > 0 ? 0 : Math.round(255 * 0.5));
+
+  function stepFan(name: string, raw: number, delta: number) {
+    const base = pending[name] ?? fanToPercent(raw);
+    queueFan(name, Math.min(100, Math.max(0, base + delta)));
   }
+
+  function toggleFan(name: string, raw: number) {
+    const base = pending[name] ?? fanToPercent(raw);
+    queueFan(name, base > 0 ? 0 : 50);
+  }
+
   async function handleLed(on: boolean) {
+    ledPending = on;
     error = '';
-    try { await setLed(on); } catch (e) { error = toErrorMessage(e); }
+    try {
+      await setLed(on);
+    } catch (e) {
+      error = toErrorMessage(e);
+      ledPending = null;
+    } finally {
+      ledPending = null;
+    }
   }
-  async function handleFan(name: string, rawSpeed: number) {
-    error = '';
-    try { await setFan(name, rawSpeed); } catch (e) { error = toErrorMessage(e); }
-  }
+
   async function handleSpeedMode(e: Event) {
     const mode = parseInt((e.target as HTMLSelectElement).value);
     error = '';
     try { await setSpeedMode(mode); } catch (e) { error = toErrorMessage(e); }
   }
+
+  onDestroy(() => {
+    for (const t of Object.values(timers)) clearTimeout(t);
+  });
 </script>
 
 <div class="aux-col">
@@ -95,6 +102,7 @@
     { name: 'aux_fan', label: 'Assist', raw: auxFanSpeed },
     { name: 'box_fan', label: 'Case',   raw: boxFanSpeed },
   ] as fan (fan.name)}
+    {@const pct = pending[fan.name] ?? fanToPercent(fan.raw)}
     <div class="fan-row">
       <div class="fan-left">
         <svg width="13" height="13" viewBox="0 0 15 15" fill="none" aria-hidden="true">
@@ -109,13 +117,17 @@
       </div>
       <div class="fan-right">
         <label class="switch">
-          <input type="checkbox" checked={isFanOn(fan.raw)} on:change={() => toggleFan(fan.name, fan.raw)}/>
+          <input
+            type="checkbox"
+            checked={pct > 0}
+            on:change={() => toggleFan(fan.name, fan.raw)}
+          />
           <span class="slider"></span>
         </label>
-        <div class="stepper" class:off={!isFanOn(fan.raw)}>
-          <button on:click={() => stepFan(fan.name, fan.raw, -5)} disabled={!isFanOn(fan.raw) || fanToPercent(fan.raw) <= 0}>−</button>
-          <span class="step-pct mono">{fanToPercent(fan.raw)}%</span>
-          <button on:click={() => stepFan(fan.name, fan.raw, 5)} disabled={!isFanOn(fan.raw) || fanToPercent(fan.raw) >= 100}>+</button>
+        <div class="stepper" class:off={pct <= 0} class:live={fan.name in pending}>
+          <button on:click={() => stepFan(fan.name, fan.raw, -5)} disabled={pct <= 0}>−</button>
+          <span class="step-pct mono" class:unsent={fan.name in pending}>{pct}%</span>
+          <button on:click={() => stepFan(fan.name, fan.raw, 5)} disabled={pct >= 100}>+</button>
         </div>
       </div>
     </div>
@@ -125,12 +137,12 @@
 
   <div class="fan-row">
     <div class="fan-left">
-      <Lightbulb size={13} strokeWidth={1.9} style={ledOn ? 'color: var(--warning);' : ''} aria-hidden="true" />
+      <Lightbulb size={13} strokeWidth={1.9} style={displayLed ? 'color: var(--warning);' : ''} aria-hidden="true" />
       <span class="fan-name">Chamber Light</span>
     </div>
     <div class="fan-right">
       <label class="switch">
-        <input type="checkbox" checked={ledOn} on:change={(e) => handleLed(e.currentTarget.checked)}/>
+        <input type="checkbox" checked={displayLed} on:change={(e) => handleLed(e.currentTarget.checked)}/>
         <span class="slider"></span>
       </label>
     </div>
@@ -199,8 +211,10 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
+    transition: border-color 0.15s;
   }
   .stepper.off { opacity: 0.4; }
+  .stepper.live { border-color: var(--accent); }
   .stepper button {
     width: 24px;
     height: 24px;
@@ -210,12 +224,15 @@
   }
   .stepper button:hover:not(:disabled) { background: var(--surface3); color: var(--text); }
   .stepper button:disabled { opacity: 0.5; cursor: not-allowed; }
+
   .step-pct {
     font-size: 11px;
     min-width: 34px;
     text-align: center;
     color: var(--text);
+    transition: color 0.15s;
   }
+  .step-pct.unsent { color: var(--accent); }
 
   .mono {
     font-family: var(--font-mono);
