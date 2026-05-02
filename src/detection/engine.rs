@@ -175,7 +175,7 @@ impl DetectionEngine {
                                         );
                                         s.add_event(
                                             EventKind::FailureNotifyThreshold,
-                                            format!("Failure risk detected (score: {:.0}%)", score * 100.0),
+                                            format!("Failure risk {:.0}% (threshold: {:.0}%)", score * 100.0, self.config.notify_threshold * 100.0),
                                         );
                                         // reset notify counter
                                         self.consecutive_notify = 0;

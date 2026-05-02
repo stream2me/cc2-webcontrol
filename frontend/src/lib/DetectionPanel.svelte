@@ -46,9 +46,9 @@
   const PT = 10;
   const PB = 8;
   const PH = GH - PT - PB;
-  // max gap before compression kicks in (30 min)
+  const PL = 10;
+  const PR = 10;
   const MAX_GAP_SECS = 1800;
-  // gap exceeding this gets a break marker
   const BREAK_GAP_SECS = 600;
 
   function mapY(v: number): number {
@@ -58,11 +58,12 @@
   function computeXPositions(pts: DetectionPoint[], width: number): number[] {
     if (pts.length === 0) return [];
     if (pts.length === 1) return [width / 2];
+    const usable = width - PL - PR;
     const gaps = pts.slice(1).map((p, i) => Math.min(p.ts - pts[i].ts, MAX_GAP_SECS));
     const total = gaps.reduce((a, b) => a + b, 0);
-    if (total === 0) return pts.map((_, i) => (i / (pts.length - 1)) * width);
-    const pos: number[] = [0];
-    for (const g of gaps) pos.push(pos[pos.length - 1] + (g / total) * width);
+    if (total === 0) return pts.map((_, i) => PL + (i / (pts.length - 1)) * usable);
+    const pos: number[] = [PL];
+    for (const g of gaps) pos.push(pos[pos.length - 1] + (g / total) * usable);
     return pos;
   }
 

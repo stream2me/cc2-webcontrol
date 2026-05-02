@@ -119,6 +119,9 @@
               Loaded
             </span>
           {/if}
+          {#if sp.brand?.toLowerCase() === 'elegoo'}
+            <span class="elegoo-tag" title="Elegoo filament">Elegoo</span>
+          {/if}
         </button>
       {/each}
     </div>
@@ -137,12 +140,6 @@
           <span class="info-label">Family</span>
           <span class="info-value">{spools[selected]?.plasticFamily ?? '-'}</span>
         </div>
-        {#if spools[selected]?.brand?.toLowerCase() === 'elegoo'}
-          <div class="info-row">
-            <span class="info-label">Brand</span>
-            <span class="brand-tag elegoo">Elegoo</span>
-          </div>
-        {/if}
         <div class="info-row">
           <span class="info-label">State</span>
           <span class="info-value">
@@ -326,6 +323,21 @@
     border-radius: var(--radius-pill);
   }
 
+  .elegoo-tag {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(45,135,240,0.12);
+    border: 1px solid rgba(45,135,240,0.3);
+    padding: 2px 5px;
+    border-radius: var(--radius-pill);
+  }
+
   /* slot actions */
   .slot-actions {
     display: flex;
@@ -373,22 +385,6 @@
   }
   .mini-chip.on { color: var(--success); background: var(--success-dim); border-color: rgba(74,140,92,0.35); }
   .mini-chip.off { color: var(--muted2); }
-
-  .brand-tag {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: var(--radius-pill);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .brand-tag.elegoo {
-    background: rgba(45,135,240,0.12);
-    color: var(--accent);
-    border: 1px solid rgba(45,135,240,0.3);
-  }
 
   .slot-buttons {
     display: flex;

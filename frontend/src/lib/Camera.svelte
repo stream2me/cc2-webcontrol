@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Camera as CameraIcon } from 'lucide-svelte';
+  import { Camera as CameraIcon, Maximize2, Minimize2 } from 'lucide-svelte';
   import { printer, showToast } from '../stores';
   import { getLatestDetection, setExcludeZones } from '../api';
   import { toErrorMessage } from './errors';
@@ -9,7 +9,9 @@
   let collapsed = false;
   let editMode = false;
   let savedMsg = false;
+  let isFullscreen = false;
 
+  let camWrap: HTMLDivElement;
   let canvas: HTMLCanvasElement;
   let imgEl: HTMLImageElement;
   let canvasReady = false;
@@ -42,12 +44,26 @@
     }
   }
 
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      camWrap.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  function onFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
+  }
+
   onMount(() => {
     pollTimer = window.setInterval(pollDetection, 2000);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
   });
   onDestroy(() => {
     clearInterval(pollTimer);
     if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+    document.removeEventListener('fullscreenchange', onFullscreenChange);
   });
 
   function onImgLoad() {
@@ -252,7 +268,7 @@
   </div>
 
   {#if !collapsed}
-    <div class="cam-wrap">
+    <div class="cam-wrap" bind:this={camWrap}>
       {#if connected && streamUrl && !imgError}
         <img
           bind:this={imgEl}
@@ -290,6 +306,13 @@
           </span>
         </div>
       {/if}
+      <button class="fs-btn" on:click={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+        {#if isFullscreen}
+          <Minimize2 size={14} strokeWidth={2} />
+        {:else}
+          <Maximize2 size={14} strokeWidth={2} />
+        {/if}
+      </button>
     </div>
   {/if}
 </div>
@@ -403,6 +426,37 @@
     pointer-events: auto;
     cursor: crosshair;
   }
+
+  .fs-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: var(--radius-sm);
+    color: rgba(255,255,255,0.75);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+  }
+  .cam-wrap:hover .fs-btn { opacity: 1; }
+  .fs-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+
+  :global(.cam-wrap:-webkit-full-screen) { background: #000; }
+  :global(.cam-wrap:fullscreen) { background: #000; }
+  :global(.cam-wrap:fullscreen img),
+  :global(.cam-wrap:-webkit-full-screen img) {
+    object-fit: contain;
+    width: 100%;
+    height: 100%;
+  }
+  :global(.cam-wrap:fullscreen .fs-btn),
+  :global(.cam-wrap:-webkit-full-screen .fs-btn) { opacity: 1; }
 
   .edit-hint {
     position: absolute;
