@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { connect, disconnect, sendPing, wsConnected } from './ws';
-  import { printer } from './stores';
+  import { printer, requestOpenSettings } from './stores';
   import { checkSetup } from './api';
   import Onboarding from './lib/Onboarding.svelte';
   import SettingsModal from './lib/SettingsModal.svelte';
@@ -16,8 +16,15 @@
   import Toast from './lib/Toast.svelte';
 
   let showSettings = false;
+  let settingsInitialSection = 'general';
   let route: 'loading' | 'setup' | 'monitor' = 'loading';
   let pingInterval: number | undefined;
+
+  $: if ($requestOpenSettings !== null) {
+    settingsInitialSection = $requestOpenSettings;
+    showSettings = true;
+    requestOpenSettings.set(null);
+  }
 
   function currentPath(): string {
     if (window.location.hash.startsWith('#/')) {
@@ -115,7 +122,7 @@
   </div>
 
   {#if showSettings}
-    <SettingsModal on:close={() => showSettings = false} />
+    <SettingsModal initialSection={settingsInitialSection} on:close={() => showSettings = false} />
   {/if}
 {/if}
 

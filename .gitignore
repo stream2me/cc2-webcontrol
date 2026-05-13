@@ -12,3 +12,5 @@
 !/config.example.toml
 
 .env
+
+/debug/

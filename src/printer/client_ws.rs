@@ -91,7 +91,14 @@ impl MqttWsClient {
             .map_err(|_| PrinterError::WebSocket("CONNACK timeout".to_string()))??;
 
         if code != 0 {
-            return Err(PrinterError::WebSocket(format!("CONNACK rejected: code {code}")));
+            let reason = match code {
+                1 => "bad credentials",
+                2 => "client id not allowed",
+                3 => "server unavailable",
+                _ => "rejected",
+            };
+            error!("[ws] CONNACK rejected: code {code} ({reason})");
+            return Err(PrinterError::WebSocket(format!("CONNACK rejected: code {code} ({reason})")));
         }
         debug!("ws client CONNACK accepted (code=0)");
 
@@ -123,8 +130,15 @@ impl MqttWsClient {
 
         let mut registered = false;
         let mut heartbeat = interval(Duration::from_secs(10));
-        let session_refresh = tokio::time::sleep(Duration::from_secs(8 * 60));
-        tokio::pin!(session_refresh);
+        let mut pre_reg_queue: Vec<Command> = Vec::with_capacity(12);
+        let mut last_status_push = tokio::time::Instant::now();
+        // one in-flight thumbnail request at a time
+        let mut pending_thumb: Option<String> = None;
+        let mut last_thumb_req: Option<tokio::time::Instant> = None;
+
+        // reconnect if no frames for 30s
+        let watchdog = tokio::time::sleep(Duration::from_secs(30));
+        tokio::pin!(watchdog);
 
         loop {
             tokio::select! {
@@ -138,12 +152,12 @@ impl MqttWsClient {
                     }
                 }
 
-                _ = &mut session_refresh => {
-                    info!("[ws] session refresh – reconnecting");
+                _ = &mut watchdog => {
+                    warn!("[ws] receive watchdog expired (30s no frames), reconnecting");
                     connected_tx.send(false).ok();
                     state_changed_tx.send(()).ok();
                     Self::drain_pending_rpcs(&pending_rpcs).await;
-                    return Ok(());
+                    return Err(PrinterError::WebSocket("receive timeout".to_string()));
                 }
 
                 _ = heartbeat.tick() => {
@@ -153,6 +167,17 @@ impl MqttWsClient {
                                 warn!("[ws] heartbeat publish failed: {e}");
                             }
                         }
+                        // status push quiet too long; force full snapshot
+                        if last_status_push.elapsed() >= Duration::from_secs(60) {
+                            debug!("[ws] no status push in 60s, requesting full status refresh");
+                            let req = serde_json::json!({"id": id_seq, "method": METHOD_GET_FULL_STATUS});
+                            id_seq += 1;
+                            if let Ok(p) = serde_json::to_vec(&req) {
+                                if let Err(e) = mqtt.publish(&mut write, &api_request_topic, &p).await {
+                                    warn!("[ws] status refresh publish failed: {e}");
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -160,7 +185,12 @@ impl MqttWsClient {
                     match result {
                         Ok(Command { id, method, params }) => {
                             if !registered {
-                                debug!("[ws-cmd] dropping method {method} - not yet registered");
+                                if pre_reg_queue.len() < 12 {
+                                    pre_reg_queue.push(Command { id, method, params });
+                                    debug!("[ws-cmd] queued method {method} (pre-registration, {} queued)", pre_reg_queue.len());
+                                } else {
+                                    debug!("[ws-cmd] dropping method {method} - pre-reg queue full");
+                                }
                             } else {
                                 let req = match params {
                                     Some(p) => serde_json::json!({"id": id, "method": method, "params": p}),
@@ -187,9 +217,25 @@ impl MqttWsClient {
                 msg = read.next() => {
                     match msg {
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
+                            watchdog.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(30));
                             if let Some(packet) = mqtt.parse_packet(&data) {
                                 match packet {
-                                    WsPacket::Publish(topic, payload) => {
+                                    WsPacket::Publish { topic, payload, ack_id } => {
+                                        // must PUBACK qos1 msgs or broker retry queue stalls
+                                        // stalled retry queue blocks new responses
+                                        if let Some(pid) = ack_id {
+                                            if let Err(e) = mqtt.puback(&mut write, pid).await {
+                                                warn!("[ws] PUBACK failed: {e}");
+                                            }
+                                        }
+                                        // heartbeat for full-status refresh path
+                                        if topic == api_status_topic {
+                                            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                                                if v.get("method").and_then(|m| m.as_u64()) == Some(METHOD_STATUS_PUSH as u64) {
+                                                    last_status_push = tokio::time::Instant::now();
+                                                }
+                                            }
+                                        }
                                         if topic == register_response_topic {
 
                                             if let Ok(val) = serde_json::from_slice::<Value>(&payload) {
@@ -215,6 +261,25 @@ impl MqttWsClient {
                                                             warn!("[ws] initial ams-info publish failed: {e}");
                                                         }
                                                     }
+                                                    let req_files = serde_json::json!({"id": id_seq, "method": METHOD_GET_FILE_LIST,
+                                                        "params": {"storage_media": "local", "pageNumber": 1, "pageSize": 50}});
+                                                    id_seq += 1;
+                                                    if let Ok(p) = serde_json::to_vec(&req_files) {
+                                                        if let Err(e) = mqtt.publish(&mut write, &api_request_topic, &p).await {
+                                                            warn!("[ws] initial file-list publish failed: {e}");
+                                                        }
+                                                    }
+                                                    for queued in pre_reg_queue.drain(..) {
+                                                        let req = match queued.params {
+                                                            Some(p) => serde_json::json!({"id": queued.id, "method": queued.method, "params": p}),
+                                                            None => serde_json::json!({"id": queued.id, "method": queued.method}),
+                                                        };
+                                                        if let Ok(p) = serde_json::to_vec(&req) {
+                                                            if let Err(e) = mqtt.publish(&mut write, &api_request_topic, &p).await {
+                                                                warn!("[ws-cmd] pre-reg drain method {} failed: {e}", queued.method);
+                                                            }
+                                                        }
+                                                    }
                                                 } else {
                                                     error!("ws registration rejected: {val}");
                                                     return Err(PrinterError::WebSocket("registration rejected".to_string()));
@@ -229,6 +294,8 @@ impl MqttWsClient {
                                                 &state,
                                                 &state_changed_tx,
                                                 &pending_rpcs,
+                                                &mut pending_thumb,
+                                                &mut last_thumb_req,
                                             )
                                             .await {
                                                 let req = serde_json::json!({
@@ -252,7 +319,7 @@ impl MqttWsClient {
                             }
                         }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) => {
-                            warn!("ws client received close frame");
+                            warn!("[ws] server closed connection");
                             connected_tx.send(false).ok();
                             state_changed_tx.send(()).ok();
                             Self::drain_pending_rpcs(&pending_rpcs).await;
@@ -260,14 +327,14 @@ impl MqttWsClient {
                         }
                         Some(Ok(_)) => {}
                         Some(Err(e)) => {
-                            error!("ws client error: {e}");
+                            error!("[ws] stream error: {e}");
                             connected_tx.send(false).ok();
                             state_changed_tx.send(()).ok();
                             Self::drain_pending_rpcs(&pending_rpcs).await;
                             return Err(PrinterError::WebSocket(e.to_string()));
                         }
                         None => {
-                            warn!("ws client stream ended");
+                            warn!("[ws] stream ended (printer disconnected)");
                             connected_tx.send(false).ok();
                             state_changed_tx.send(()).ok();
                             Self::drain_pending_rpcs(&pending_rpcs).await;
@@ -284,7 +351,7 @@ impl MqttWsClient {
         Ok(())
     }
 
-    // drop all pending senders → rpc_call receivers get Err immediately
+    // fail all waiting RPC callers on disconnect
     async fn drain_pending_rpcs(rpcs: &PendingRpcs) {
         rpcs.lock().await.clear();
     }
@@ -297,6 +364,8 @@ impl MqttWsClient {
         state: &Arc<RwLock<PrinterState>>,
         state_changed_tx: &broadcast::Sender<()>,
         pending_rpcs: &PendingRpcs,
+        pending_thumb: &mut Option<String>,
+        last_thumb_req: &mut Option<tokio::time::Instant>,
     ) -> Option<serde_json::Value> {
         if topic == api_status_topic {
             let Ok(value) = serde_json::from_slice::<Value>(payload) else { return None };
@@ -312,12 +381,50 @@ impl MqttWsClient {
                     trace!("[ws] status delta merged");
                 }
             }
+            // thumbnail fetch piggybacks status flow
+            let s = state.read().await;
+            let filename = s.full.print_status.filename.clone();
+            let is_active = matches!(s.print_state(), PrintState::Printing | PrintState::Paused);
+            let needs_thumb = !filename.is_empty() && !s.thumbnail_cache.contains_key(&filename);
+            drop(s);
+            if is_active && needs_thumb {
+                // new file resets thumbnail backoff
+                if pending_thumb.as_deref() != Some(&*filename) {
+                    *pending_thumb = Some(filename.clone());
+                    *last_thumb_req = None;
+                }
+                // retry thumbnail at most once per 30s
+                let should_request = last_thumb_req
+                    .map(|t| t.elapsed() >= Duration::from_secs(30))
+                    .unwrap_or(true);
+                if should_request {
+                    *last_thumb_req = Some(tokio::time::Instant::now());
+                    debug!("[ws] requesting thumbnail for {filename}");
+                    return Some(serde_json::json!({
+                        "method": METHOD_GET_FILE_THUMBNAIL,
+                        "params": { "storage_media": "local", "file_name": filename },
+                    }));
+                }
+            }
         } else if topic == api_response_topic {
             let Ok(resp) = serde_json::from_slice::<RpcResponse>(payload) else { return None };
 
             if resp.id > 0 {
                 if let Some(tx) = pending_rpcs.lock().await.remove(&resp.id) {
-                    tx.send(resp.result.data.clone()).ok();
+                    let mut payload = resp.result.data.clone();
+                    match &mut payload {
+                        serde_json::Value::Object(map) => {
+                            map.entry("error_code".to_string())
+                                .or_insert_with(|| serde_json::json!(resp.result.error_code));
+                        }
+                        _ => {
+                            payload = serde_json::json!({
+                                "error_code": resp.result.error_code,
+                                "value": payload,
+                            });
+                        }
+                    }
+                    tx.send(payload).ok();
                 }
             }
 
@@ -334,6 +441,8 @@ impl MqttWsClient {
                     drop(s);
 
                     if is_active && needs_thumb {
+                        *pending_thumb = Some(filename.clone());
+                        *last_thumb_req = Some(tokio::time::Instant::now());
                         return Some(serde_json::json!({
                             "method": METHOD_GET_FILE_THUMBNAIL,
                             "params": { "storage_media": "local", "file_name": filename },
@@ -343,18 +452,31 @@ impl MqttWsClient {
             } else if resp.method == METHOD_GET_FILE_THUMBNAIL {
                 let thumb = resp.result.data.get("thumbnail").and_then(|v| v.as_str()).unwrap_or("");
                 if !thumb.is_empty() {
-                    let filename = state.read().await.full.print_status.filename.clone();
+                    // cache by requested file, not current possibly-raced filename
+                    let filename = if let Some(f) = pending_thumb.clone().filter(|f| !f.is_empty()) {
+                        f
+                    } else {
+                        state.read().await.full.print_status.filename.clone()
+                    };
                     if !filename.is_empty() {
                         state.write().await.thumbnail_cache.insert(filename.clone(), thumb.to_string());
                         state_changed_tx.send(()).ok();
                         info!("[ws] thumbnail cached for {filename}");
                     }
+                } else {
+                    // empty payload likely transient; keep backoff timer
+                    debug!("[ws] thumbnail response empty for {:?}", pending_thumb);
                 }
             } else if resp.method == METHOD_GET_FILE_LIST && resp.result.error_code == 0 {
                 if let Some(arr) = resp.result.data.get("file_list").and_then(|v| v.as_array()) {
-                    info!("[ws] file list loaded: {} files", arr.len());
-                    state.write().await.files = arr.clone();
-                    state_changed_tx.send(()).ok();
+                    // printer returns empty list while busy printing; keep cached list
+                    if !arr.is_empty() {
+                        info!("[ws] file list loaded: {} files", arr.len());
+                        state.write().await.files = arr.clone();
+                        state_changed_tx.send(()).ok();
+                    } else {
+                        debug!("[ws] file list response empty, keeping cached list");
+                    }
                 }
             } else if resp.method == METHOD_GET_AMS_INFO && resp.result.error_code == 0 {
                 if let Some(canvas) = resp.result.data.get("canvas_info") {
@@ -369,7 +491,7 @@ impl MqttWsClient {
 }
 
 enum WsPacket {
-    Publish(String, Vec<u8>),
+    Publish { topic: String, payload: Vec<u8>, ack_id: Option<u16> },
     ConnAck(u8),
     SubAck,
     PubAck,
@@ -444,6 +566,17 @@ impl MqttOverWs {
         Ok(())
     }
 
+    async fn puback(
+        &self,
+        write: &mut (impl SinkExt<tokio_tungstenite::tungstenite::Message> + Unpin),
+        packet_id: u16,
+    ) -> Result<(), PrinterError> {
+        write
+            .send(tokio_tungstenite::tungstenite::Message::Binary(encode_puback(packet_id)))
+            .await
+            .map_err(|_| PrinterError::WebSocket("ws PUBACK send failed".to_string()))
+    }
+
     async fn publish(
         &self,
         write: &mut (impl SinkExt<tokio_tungstenite::tungstenite::Message> + Unpin),
@@ -501,15 +634,19 @@ impl MqttOverWs {
 
                 // qos packet id
                 let qos = (data[0] >> 1) & 0x03;
-                if qos > 0 {
+                let ack_id = if qos > 0 {
                     if pos + 2 > data.len() {
                         warn!("[ws] PUBLISH QoS={qos} but packet too short for packet-id");
                         return None;
                     }
+                    let pid = u16::from_be_bytes([data[pos], data[pos + 1]]);
                     pos += 2;
-                }
+                    Some(pid)
+                } else {
+                    None
+                };
 
-                Some(WsPacket::Publish(topic, data[pos..].to_vec()))
+                Some(WsPacket::Publish { topic, payload: data[pos..].to_vec(), ack_id })
             }
             4 => Some(WsPacket::PubAck),
             9 => Some(WsPacket::SubAck),
@@ -542,6 +679,10 @@ fn encode_connect(client_id: &str, username: &str, password: &str) -> Vec<u8> {
     buf.extend_from_slice(&(pwd.len() as u16).to_be_bytes());
     buf.extend_from_slice(pwd);
     buf
+}
+
+fn encode_puback(packet_id: u16) -> Vec<u8> {
+    vec![0x40, 0x02, (packet_id >> 8) as u8, (packet_id & 0xFF) as u8]
 }
 
 fn encode_subscribe(packet_id: u16, topics: &[(&str, u8)]) -> Vec<u8> {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info, warn};
 
@@ -19,8 +19,10 @@ pub struct DetectionEngine {
     scores: std::collections::VecDeque<f64>,
     consecutive_notify: u32,
     consecutive_pause: u32,
+    consecutive_failures: u32,
     current_score: f64,
     enabled: bool,
+    db: Option<sqlx::SqlitePool>,
 }
 
 impl DetectionEngine {
@@ -28,6 +30,7 @@ impl DetectionEngine {
         config: DetectionConfig,
         server_port: u16,
         frame_buffer: FrameBuffer,
+        db: Option<sqlx::SqlitePool>,
     ) -> Self {
         Self {
             obico: ObicoClient::new(&config.obico_url),
@@ -37,15 +40,17 @@ impl DetectionEngine {
             scores: std::collections::VecDeque::with_capacity(10),
             consecutive_notify: 0,
             consecutive_pause: 0,
+            consecutive_failures: 0,
             current_score: 0.0,
             enabled: true,
+            db,
         }
     }
 
     pub async fn run(
         mut self,
         state: Arc<RwLock<PrinterState>>,
-        manager: Arc<Mutex<PrinterManager>>,
+        manager: Arc<PrinterManager>,
         mut enabled_rx: tokio::sync::watch::Receiver<bool>,
         mut config_rx: tokio::sync::watch::Receiver<DetectionConfig>,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -108,6 +113,7 @@ impl DetectionEngine {
 
                     match self.obico.analyze_snapshot(&proxy_url, &jpeg, &exclude_zones).await {
                         Ok(result) => {
+                            self.consecutive_failures = 0;
                             let score = result.score;
                             self.current_score = score;
                             self.push_score(score);
@@ -139,20 +145,19 @@ impl DetectionEngine {
                                 None
                             };
 
+                            let pt = DetectionPoint {
+                                ts: now,
+                                score,
+                                snapshot: snapshot_name.clone(),
+                                print_filename: print_filename.clone(),
+                                boxes: detections.clone(),
+                            };
+
                             {
                                 let mut s = state.write().await;
                                 s.detection_score = score;
-                                let pt = DetectionPoint {
-                                    ts: now,
-                                    score,
-                                    snapshot: snapshot_name.clone(),
-                                    print_filename: print_filename.clone(),
-                                    boxes: detections.clone(),
-                                };
-                                #[cfg(not(test))]
-                                PrinterState::persist_detection_point(&pt);
-                                s.detection_history.push_back(pt);
-                                if s.detection_history.len() > 200 {
+                                s.detection_history.push_back(pt.clone());
+                                if s.detection_history.len() > 300 {
                                     s.detection_history.pop_front();
                                 }
                                 s.latest_detections = detections;
@@ -205,11 +210,15 @@ impl DetectionEngine {
                                 }
                             }
 
+                            if let Some(pool) = &self.db {
+                                crate::db::insert_detection_point(pool, &pt).await;
+                            }
+
                             // pause outside lock
                             if rolling_avg >= self.config.pause_threshold
                                 && self.consecutive_pause == self.config.confirmation_frames
                             {
-                                if let Err(e) = manager.lock().await.pause().await {
+                                if let Err(e) = manager.pause().await {
                                     warn!("[detection] auto-pause failed: {e}");
                                 }
                             }
@@ -218,6 +227,14 @@ impl DetectionEngine {
                         }
                         Err(e) => {
                             warn!("[detection] analysis failed: {e}");
+                            self.consecutive_failures += 1;
+                            if self.consecutive_failures == 2 {
+                                state.write().await.add_event(
+                                    EventKind::DetectionEngineError,
+                                    format!("Detection engine unavailable: {e}"),
+                                );
+                                state_changed_tx.send(()).ok();
+                            }
                         }
                     }
                 }

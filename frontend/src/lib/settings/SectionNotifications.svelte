@@ -18,6 +18,7 @@
   let newLabel = '';
   let newNtfyServer = 'https://ntfy.sh';
   let newNtfyTopic = '';
+  let newNtfyTapUrl = typeof window !== 'undefined' ? window.location.origin : '';
   let newDiscordUrl = '';
   let newWebhookUrl = '';
   let addDestState: 'idle' | 'saving' | 'error' = 'idle';
@@ -85,7 +86,7 @@
         label: newLabel.trim(),
         toggles: defaultToggles(),
         ...(newKind === 'ntfy'
-          ? { ntfy_server: newNtfyServer, ntfy_topic: newNtfyTopic }
+          ? { ntfy_server: newNtfyServer, ntfy_topic: newNtfyTopic, ntfy_tap_url: newNtfyTapUrl }
           : newKind === 'discord'
           ? { discord_webhook_url: newDiscordUrl }
           : { webhook_url: newWebhookUrl }),
@@ -95,6 +96,7 @@
       addingDest = false;
       newLabel = '';
       newNtfyTopic = '';
+      newNtfyTapUrl = typeof window !== 'undefined' ? window.location.origin : '';
       newDiscordUrl = '';
       newWebhookUrl = '';
       addDestState = 'idle';
@@ -117,7 +119,7 @@
           <span class="kind-badge kind-{dest.kind}">{dest.kind}</span>
           <span class="dest-label-txt">{dest.label}</span>
           {#if saveErrors[dest.id]}
-            <span class="save-err" title={saveErrors[dest.id]}>Save failed</span>
+            <span class="save-err">{saveErrors[dest.id]}</span>
           {/if}
           <div class="dest-acts">
             <span class="switch sm">
@@ -147,6 +149,10 @@
                 <label class="field-lbl" for="nt-{dest.id}">Topic</label>
                 <input id="nt-{dest.id}" class="input mono" type="text" bind:value={dest.ntfy_topic} />
               </div>
+              <div class="field-row">
+                <label class="field-lbl" for="ntu-{dest.id}">Tap URL</label>
+                <input id="ntu-{dest.id}" class="input mono" type="text" bind:value={dest.ntfy_tap_url} placeholder="http://192.168.x.x:port" />
+              </div>
             {:else if dest.kind === 'discord'}
               <div class="field-row">
                 <label class="field-lbl" for="dw-{dest.id}">Webhook URL</label>
@@ -161,13 +167,22 @@
 
             <div class="toggles-grid">
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.print_started} /> Print started</label>
-              <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.print_finished} /> Print finished</label>
+              <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.print_finished_ok} /> Print finished</label>
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.print_paused} /> Print paused</label>
+              <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.print_resumed} /> Print resumed</label>
+              <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.print_stopped} /> Print stopped</label>
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.failure_notify} /> Failure risk</label>
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.failure_pause} /> Failure confirmed</label>
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.auto_paused} /> Auto-paused</label>
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.camera_lost} /> Camera lost</label>
               <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.camera_restored} /> Camera restored</label>
+              <label class="tgl error-tgl"><input type="checkbox" bind:checked={dest.toggles.detection_engine_error} /> Detection unavailable</label>
+              <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.disconnected} /> Printer disconnected</label>
+              <label class="tgl"><input type="checkbox" bind:checked={dest.toggles.connected} /> Printer connected</label>
+              <label class="tgl error-tgl"><input type="checkbox" bind:checked={dest.toggles.emergency_stop} /> Emergency stop</label>
+              <label class="tgl error-tgl"><input type="checkbox" bind:checked={dest.toggles.machine_error} /> Printer error</label>
+              <label class="tgl error-tgl"><input type="checkbox" bind:checked={dest.toggles.id_not_match} /> ID not match</label>
+              <label class="tgl error-tgl"><input type="checkbox" bind:checked={dest.toggles.auth_error} /> Auth error</label>
             </div>
 
             <div class="dest-footer">
@@ -219,6 +234,10 @@
         <div class="field-row">
           <label class="field-lbl" for="new-nt">Topic</label>
           <input id="new-nt" class="input mono" type="text" bind:value={newNtfyTopic} placeholder="cc2-my-topic" />
+        </div>
+        <div class="field-row">
+          <label class="field-lbl" for="new-ntu">Tap URL</label>
+          <input id="new-ntu" class="input mono" type="text" bind:value={newNtfyTapUrl} placeholder="http://192.168.x.x:port" />
         </div>
       {:else if newKind === 'discord'}
         <div class="field-row">
@@ -288,6 +307,7 @@
 
   .toggles-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-top: 4px; }
   .tgl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .error-tgl { color: var(--danger); }
 
   .dest-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   .test-err { font-size: 11px; color: var(--danger); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

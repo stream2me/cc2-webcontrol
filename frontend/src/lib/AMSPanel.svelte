@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Disc2 } from 'lucide-svelte';
   import { printer, showToast, type CanvasInfo, type TrayEntry } from '../stores';
-  import { refreshCanvas } from '../api';
+  import { refreshCanvas, setCanvasAutoRefill } from '../api';
   import { toErrorMessage } from './errors';
 
   let refreshing = false;
@@ -63,6 +63,24 @@
   }
 
   let selected = 0;
+
+  // auto-refill toggle with optimistic UI
+  $: autoRefill = canvasInfo?.auto_refill ?? false;
+  let autoRefillPending: boolean | null = null;
+  $: displayAutoRefill = autoRefillPending ?? autoRefill;
+
+  async function handleAutoRefill(val: boolean) {
+    const prev = autoRefill;
+    autoRefillPending = val;
+    try {
+      await setCanvasAutoRefill(val);
+    } catch (e) {
+      autoRefillPending = prev;
+      showToast(toErrorMessage(e), 'error', 5000);
+    } finally {
+      autoRefillPending = null;
+    }
+  }
 
   function labelColorFor(bg: string | null): string {
     if (!bg) return 'var(--muted)';
@@ -175,6 +193,19 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <div class="footer-row">
+    <span class="footer-label">Auto Refill</span>
+    <label class="toggle" title="Automatically switch to next spool when current runs out">
+      <input
+        type="checkbox"
+        checked={displayAutoRefill}
+        disabled={!connected}
+        on:change={(e) => handleAutoRefill(e.currentTarget.checked)}
+      />
+      <span class="knob"></span>
+    </label>
   </div>
 </section>
 
@@ -399,4 +430,39 @@
   @media (max-width: 560px) {
     .ams-body { grid-template-columns: 1fr; }
   }
+
+  .footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px 10px;
+    border-top: 1px solid var(--border);
+  }
+  .footer-label {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .toggle { position: relative; display: block; width: 36px; height: 20px; cursor: pointer; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle input:disabled + .knob { opacity: 0.45; cursor: not-allowed; }
+  .knob {
+    position: absolute;
+    inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 20px;
+    transition: background 0.2s;
+  }
+  .knob::before {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    left: 2px; top: 2px;
+    background: var(--muted);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+  }
+  input:checked + .knob { background: var(--surface2); border-color: var(--border2); }
+  input:checked + .knob::before { transform: translateX(16px); background: var(--accent); }
 </style>

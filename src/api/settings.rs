@@ -4,7 +4,7 @@ use serde_json::Value;
 use tracing::warn;
 
 use super::router::AppState;
-use crate::error::AppError;
+use crate::error::{AppError, ConfigError};
 
 pub async fn get_settings(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
     let config = state.config.read().await;
@@ -59,16 +59,27 @@ pub async fn update_settings(
         config.logging.level = v.to_string();
     }
 
-    if let Err(e) = config.save("config.toml") {
-        warn!("failed to persist settings to disk: {e}");
-        return Err(AppError::Config(crate::error::ConfigError::Load(
-            config::ConfigError::Message(format!("settings saved in memory but could not write config.toml: {e}"))
-        )));
-    }
-
     let det_config = config.detection.clone();
     let det_enabled = config.detection.enabled;
+    let printer_cfg = config.printer.clone();
+    let host = config.server.host.clone();
+    let port = config.server.port;
+    let log_level = config.logging.level.clone();
+    let onboarding_complete = config.onboarding_complete;
     drop(config);
+
+    if let Err(e) = crate::db::save_printer_config(&state.db, &printer_cfg).await {
+        warn!("failed to persist printer config: {e}");
+        return Err(AppError::Config(ConfigError::Db(e)));
+    }
+    if let Err(e) = crate::db::save_detection_config(&state.db, &det_config).await {
+        warn!("failed to persist detection config: {e}");
+        return Err(AppError::Config(ConfigError::Db(e)));
+    }
+    if let Err(e) = crate::db::save_server_config(&state.db, &host, port, &log_level, onboarding_complete).await {
+        warn!("failed to persist server config: {e}");
+        return Err(AppError::Config(ConfigError::Db(e)));
+    }
 
     let _ = state.det_config_tx.send(det_config);
     let _ = state.det_enabled_tx.send(det_enabled);

@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tower_http::services::ServeDir;
 
 use super::camera;
@@ -23,7 +24,7 @@ use crate::printer::state::PrinterState;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub manager: Arc<Mutex<PrinterManager>>,
+    pub manager: Arc<PrinterManager>,
     pub printer_state: Arc<RwLock<PrinterState>>,
     pub config: Arc<RwLock<AppConfig>>,
     pub det_enabled_rx: tokio::sync::watch::Receiver<bool>,
@@ -33,10 +34,12 @@ pub struct AppState {
     pub frame_buffer: FrameBuffer,
     pub camera_status: Arc<CameraStatus>,
     pub frame_broadcast: FrameBroadcast,
+    pub db: sqlx::SqlitePool,
+    pub camera_ip_tx: Arc<tokio::sync::watch::Sender<String>>,
 }
 
 pub fn build_router(
-    manager: Arc<Mutex<PrinterManager>>,
+    manager: Arc<PrinterManager>,
     state: Arc<RwLock<PrinterState>>,
     config: Arc<RwLock<AppConfig>>,
     det_enabled_rx: tokio::sync::watch::Receiver<bool>,
@@ -46,6 +49,8 @@ pub fn build_router(
     frame_buffer: FrameBuffer,
     camera_status: Arc<CameraStatus>,
     frame_broadcast: FrameBroadcast,
+    db: sqlx::SqlitePool,
+    camera_ip_tx: Arc<tokio::sync::watch::Sender<String>>,
 ) -> Router {
     let app_state = AppState {
         manager,
@@ -58,6 +63,8 @@ pub fn build_router(
         frame_buffer,
         camera_status,
         frame_broadcast,
+        db,
+        camera_ip_tx,
     };
 
     let snapshots_dir = std::path::Path::new("snapshots");
@@ -77,6 +84,8 @@ pub fn build_router(
         .route("/api/printer/pause", post(printer::pause_print))
         .route("/api/printer/resume", post(printer::resume_print))
         .route("/api/printer/stop", post(printer::stop_print))
+        .route("/api/printer/home", post(printer::home_axes))
+        .route("/api/printer/jog", post(printer::jog_axis))
         .route("/api/printer/led", post(printer::set_led))
         .route("/api/printer/fan", post(printer::set_fan))
         .route("/api/printer/speed-mode", post(printer::set_speed_mode))
@@ -84,8 +93,13 @@ pub fn build_router(
         .route("/api/printer/files", get(printer::get_files))
         .route("/api/printer/history", get(printer::get_history))
         .route("/api/printer/canvas/refresh", post(printer::canvas_refresh))
+        .route("/api/printer/canvas/auto-refill", post(printer::set_canvas_auto_refill))
         .route("/api/printer/thumbnail", get(printer::get_thumbnail))
-        .route("/api/printer/upload", post(upload::upload_file))
+        .route("/api/printer/file-detail", get(printer::get_file_detail))
+        .route(
+            "/api/printer/upload",
+            post(upload::upload_file).route_layer(DefaultBodyLimit::max(600 * 1024 * 1024)),
+        )
         .route("/api/detection/status", get(detection::get_status))
         .route("/api/detection/toggle", post(detection::toggle))
         .route("/api/detection/config", post(detection::update_config))

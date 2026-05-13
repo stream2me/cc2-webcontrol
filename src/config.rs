@@ -1,4 +1,3 @@
-use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigError;
@@ -42,7 +41,7 @@ impl ExcludeZone {
 pub struct DetectionConfig {
     pub enabled: bool,
     pub interval_secs: u32,
-    /// notify threshold
+    /// warn threshold
     #[serde(default = "default_notify_threshold")]
     pub notify_threshold: f64,
     /// pause threshold >= notify
@@ -83,6 +82,26 @@ pub struct EventToggles {
     pub camera_lost: bool,
     #[serde(default = "default_true")]
     pub camera_restored: bool,
+    #[serde(default = "default_true")]
+    pub emergency_stop: bool,
+    #[serde(default = "default_true")]
+    pub machine_error: bool,
+    #[serde(default = "default_true")]
+    pub id_not_match: bool,
+    #[serde(default = "default_true")]
+    pub auth_error: bool,
+    #[serde(default = "default_true")]
+    pub print_resumed: bool,
+    #[serde(default = "default_true")]
+    pub print_stopped: bool,
+    #[serde(default = "default_true")]
+    pub print_finished_ok: bool,
+    #[serde(default = "default_true")]
+    pub connected: bool,
+    #[serde(default = "default_true")]
+    pub disconnected: bool,
+    #[serde(default = "default_true")]
+    pub detection_engine_error: bool,
 }
 
 fn default_true() -> bool { true }
@@ -98,6 +117,16 @@ impl Default for EventToggles {
             auto_paused: true,
             camera_lost: true,
             camera_restored: true,
+            emergency_stop: true,
+            machine_error: true,
+            id_not_match: true,
+            auth_error: true,
+            print_resumed: true,
+            print_stopped: true,
+            print_finished_ok: true,
+            connected: true,
+            disconnected: true,
+            detection_engine_error: true,
         }
     }
 }
@@ -112,6 +141,9 @@ pub struct NotificationDestination {
     pub ntfy_server: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ntfy_topic: Option<String>,
+    /// URL opened when user taps the notification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ntfy_tap_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discord_webhook_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,69 +170,6 @@ pub struct LoggingConfig {
 }
 
 impl AppConfig {
-    pub fn load(path: Option<&str>) -> Result<Self, ConfigError> {
-        let mut builder = Config::builder();
-
-        if let Some(p) = path {
-            builder = builder.add_source(File::with_name(p).required(false));
-        } else {
-            builder = builder.add_source(File::with_name("config").required(false));
-        }
-
-        builder = builder.add_source(Environment::with_prefix("CC2").separator("_"));
-
-        let config = builder.build().map_err(ConfigError::Load)?;
-        let app: Self = config.try_deserialize().map_err(ConfigError::Load)?;
-
-        app.validate()?;
-        Ok(app)
-    }
-
-    pub fn load_or_default() -> (Self, bool) {
-        match Self::load(None) {
-            Ok(c) => {
-                let configured = !c.printer.ip.is_empty();
-                (c, configured)
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if !msg.contains("missing field `printer`") {
-                    eprintln!("warn: config parse/validation error, starting with defaults: {e}");
-                }
-                (Self::default(), false)
-            }
-        }
-    }
-
-    pub fn save(&self, path: &str) -> Result<(), ConfigError> {
-        let toml = toml::to_string_pretty(self).map_err(|e| {
-            ConfigError::Load(config::ConfigError::Message(e.to_string()))
-        })?;
-        std::fs::write(path, toml).map_err(|e| {
-            ConfigError::Load(config::ConfigError::Message(e.to_string()))
-        })?;
-        Ok(())
-    }
-
-    fn validate(&self) -> Result<(), ConfigError> {
-        if !self.printer.ip.is_empty() {
-            validate_ip(&self.printer.ip)?;
-        }
-        if !self.printer.pincode.is_empty() {
-            validate_pincode(&self.printer.pincode)?;
-        }
-        if !(0.0..=1.0).contains(&self.detection.notify_threshold) {
-            return Err(ConfigError::InvalidThreshold);
-        }
-        if !(0.0..=1.0).contains(&self.detection.pause_threshold) {
-            return Err(ConfigError::InvalidThreshold);
-        }
-        if self.detection.pause_threshold < self.detection.notify_threshold {
-            return Err(ConfigError::InvalidThreshold);
-        }
-        Ok(())
-    }
-
     pub fn printer_password(&self) -> &str {
         if !self.printer.pincode.is_empty() {
             &self.printer.pincode
@@ -242,12 +211,6 @@ impl Default for AppConfig {
     }
 }
 
-fn validate_ip(ip: &str) -> Result<(), ConfigError> {
-    ip.parse::<std::net::Ipv4Addr>()
-        .map_err(|_| ConfigError::InvalidIp(ip.to_string()))?;
-    Ok(())
-}
-
 /// pincode: 6 ascii alnum
 pub fn validate_pincode(p: &str) -> Result<(), ConfigError> {
     if p.len() != 6 || !p.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -265,54 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn settings_round_trip_toml() {
-        let mut cfg = base_config();
-        cfg.printer.ip = "192.168.1.50".to_string();
-        cfg.printer.printer_id = "TESTID".to_string();
-        cfg.detection.notify_threshold = 0.4;
-        cfg.detection.pause_threshold = 0.6;
-        cfg.onboarding_complete = true;
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        cfg.save(path.to_str().unwrap()).unwrap();
-
-        let loaded = AppConfig::load(Some(path.to_str().unwrap())).unwrap();
-        assert_eq!(loaded.printer.ip, "192.168.1.50");
-        assert_eq!(loaded.printer.printer_id, "TESTID");
-        assert!((loaded.detection.notify_threshold - 0.4).abs() < 1e-9);
-        assert!((loaded.detection.pause_threshold - 0.6).abs() < 1e-9);
-        assert!(loaded.onboarding_complete);
-    }
-
-    #[test]
-    fn settings_round_trip_notification_destination() {
-        let mut cfg = base_config();
-        cfg.notifications.destinations.push(NotificationDestination {
-            id: "dest1".to_string(),
-            kind: DestinationKind::Ntfy,
-            enabled: true,
-            label: "My Phone".to_string(),
-            ntfy_server: Some("https://ntfy.sh".to_string()),
-            ntfy_topic: Some("cc2-alerts".to_string()),
-            discord_webhook_url: None,
-            webhook_url: None,
-            toggles: EventToggles::default(),
-        });
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        cfg.save(path.to_str().unwrap()).unwrap();
-
-        let loaded = AppConfig::load(Some(path.to_str().unwrap())).unwrap();
-        assert_eq!(loaded.notifications.destinations.len(), 1);
-        let dest = &loaded.notifications.destinations[0];
-        assert_eq!(dest.label, "My Phone");
-        assert_eq!(dest.kind, DestinationKind::Ntfy);
-        assert_eq!(dest.ntfy_topic.as_deref(), Some("cc2-alerts"));
-    }
-
-    #[test]
     fn validate_pincode_accepts_valid() {
         assert!(validate_pincode("ABC123").is_ok());
         assert!(validate_pincode("000000").is_ok());
@@ -326,21 +241,6 @@ mod tests {
         assert!(validate_pincode("AB-C12").is_err());
         assert!(validate_pincode("AB C12").is_err());
         assert!(validate_pincode("ABC12!").is_err());
-    }
-
-    #[test]
-    fn validate_thresholds_rejects_inverted() {
-        let mut cfg = base_config();
-        cfg.printer.ip = String::new();
-        cfg.detection.notify_threshold = 0.8;
-        cfg.detection.pause_threshold = 0.6;
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        cfg.save(path.to_str().unwrap()).unwrap();
-
-        let result = AppConfig::load(Some(path.to_str().unwrap()));
-        assert!(result.is_err(), "inverted thresholds must be rejected");
     }
 
     #[test]

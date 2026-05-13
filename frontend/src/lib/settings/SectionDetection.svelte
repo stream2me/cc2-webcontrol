@@ -9,6 +9,8 @@
     getDetectionGrouped,
     type RunDetectionResult, type DetectionGroup, type GroupSnapshot,
   } from '../../api';
+  import { printer } from '../../stores';
+  import type { DetectionPoint } from '../../stores';
   import { toErrorMessage } from '../errors';
 
   export let detection: {
@@ -71,6 +73,7 @@
       groups = [];
       snapshotTotal = 0;
       snapshotTotalBytes = 0;
+      printer.update(s => ({ ...s, detection_history: [] }));
     } catch {
     } finally {
       purging = false;
@@ -84,6 +87,13 @@
     groups = groups.filter((g) => g !== group);
     snapshotTotal = Math.max(0, snapshotTotal - filenames.length);
     if (stackViewerGroup === group) stackViewerGroup = null;
+    const removed = new Set(filenames);
+    printer.update(s => ({
+      ...s,
+      detection_history: (s.detection_history as DetectionPoint[]).filter(
+        p => !p.snapshot || !removed.has(p.snapshot)
+      ),
+    }));
   }
 
   function openGroupLightbox(gs: GroupSnapshot) {
@@ -564,7 +574,7 @@
   }
   .snap-del-btn:hover { background: var(--danger); }
   .snap-thumb-wrap:hover .snap-del-btn { display: inline-flex; }
-  /* hide stack badge on hover to avoid overlap with del button */
+  /* hide count badge so delete button remains legible */
   .snap-thumb-wrap:hover .snap-stack-badge { opacity: 0; }
   .snap-info { font-size: 10px; color: var(--muted2); text-align: center; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

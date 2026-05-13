@@ -1,4 +1,4 @@
-use axum::extract::Query;
+use axum::extract::{Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 use tracing::warn;
 
+use super::router::AppState;
 use crate::detection::obico::Detection;
 
 const SNAPSHOTS_DIR: &str = "snapshots";
@@ -47,6 +48,7 @@ pub async fn list_snapshots(Query(q): Query<ListQuery>) -> Json<SnapshotListResp
 }
 
 pub async fn delete_snapshot(
+    State(state): State<AppState>,
     axum::extract::Path(filename): axum::extract::Path<String>,
 ) -> Json<Value> {
     if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
@@ -55,10 +57,11 @@ pub async fn delete_snapshot(
     let path = Path::new(SNAPSHOTS_DIR).join(&filename);
     let deleted = std::fs::remove_file(&path).is_ok();
     let _ = std::fs::remove_file(path.with_extension("json"));
+    crate::db::delete_detection_point_by_snapshot(&state.db, &filename).await;
     Json(serde_json::json!({ "deleted": deleted }))
 }
 
-pub async fn delete_all_snapshots() -> Json<Value> {
+pub async fn delete_all_snapshots(State(state): State<AppState>) -> Json<Value> {
     let dir = Path::new(SNAPSHOTS_DIR);
     let mut deleted = 0u32;
     if let Ok(rd) = std::fs::read_dir(dir) {
@@ -74,6 +77,7 @@ pub async fn delete_all_snapshots() -> Json<Value> {
             }
         }
     }
+    crate::db::clear_detection_points(&state.db).await;
     Json(serde_json::json!({ "deleted": deleted }))
 }
 

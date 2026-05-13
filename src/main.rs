@@ -1,6 +1,7 @@
 mod api;
 mod camera;
 mod config;
+mod db;
 mod detection;
 mod docker;
 mod error;
@@ -8,14 +9,15 @@ mod notifications;
 mod printer;
 
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
-use tokio::sync::{watch, Mutex, RwLock};
-use tracing::{error, info};
+use tokio::sync::{broadcast, watch, RwLock};
+use tracing::{error, info, warn};
 
 use camera::{spawn_frame_grabber, FrameBuffer};
 use config::AppConfig;
 use printer::manager::PrinterManager;
-use printer::state::{EventKind, PrinterState};
+use printer::state::EventKind;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,20 +25,40 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn main() {
     println!("cc2-openwebui v{VERSION}");
 
-    let (config, pre_configured) = AppConfig::load_or_default();
-
-    init_tracing(&config.logging.level);
-
     let _ = std::fs::create_dir_all("data");
     let _ = std::fs::create_dir_all("snapshots");
+
+    let db = match db::init_db("data/cc2.db").await {
+        Ok(pool) => pool,
+        Err(e) => {
+            eprintln!("error: failed to initialize database: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    db::migrate_jsonl(&db).await;
+
+    let config = match db::load_app_config(&db).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warn: could not load config from db, using defaults: {e}");
+            AppConfig::default()
+        }
+    };
+    let pre_configured = !config.printer.ip.is_empty();
+
+    init_tracing(&config.logging.level);
+    info!("database initialized at data/cc2.db");
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
 
     let (det_enabled_tx, det_enabled_rx) = watch::channel(config.detection.enabled);
     let (det_config_tx, det_config_rx) = watch::channel(config.detection.clone());
 
-    let mut manager = PrinterManager::new(config.clone());
+    let manager = PrinterManager::new(config.clone());
     let state_changed_tx = manager.state_changed_sender();
+
+    let event_rx_for_db = manager.event_rx();
 
     if pre_configured {
         if let Err(e) = manager.start().await {
@@ -48,8 +70,8 @@ async fn main() {
     }
 
     {
-        let past = PrinterState::load_events_from_log(100);
-        let total = PrinterState::count_events_log();
+        let past = db::query_events(&db, 100).await;
+        let total = db::count_events(&db).await;
         if !past.is_empty() || total > 0 {
             let mut s = manager.state.write().await;
             s.events_total = total.max(past.len() as u64);
@@ -58,23 +80,46 @@ async fn main() {
     }
 
     {
-        let history = PrinterState::load_detection_history(200);
+        let history = db::query_detection_points(&db, None, 300).await;
         if !history.is_empty() {
             let mut s = manager.state.write().await;
-            s.detection_history = history;
+            s.detection_history = history.into();
         }
     }
 
     let manager_state = manager.state.clone();
-    let manager_arc = Arc::new(Mutex::new(manager));
+    let manager_arc = Arc::new(manager);
+
+    {
+        let db_w = db.clone();
+        tokio::spawn(async move {
+            let mut rx = event_rx_for_db;
+            loop {
+                match rx.recv().await {
+                    Ok(evt) => {
+                        let ts = evt.timestamp.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let kind = event_kind_str_for_db(&evt.kind);
+                        db::insert_event(&db_w, ts, &kind, &evt.description, evt.snapshot.as_deref()).await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("[db] event writer lagged, {n} events dropped");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
 
     let frame_buffer: FrameBuffer = Arc::new(RwLock::new(None));
 
-    let (camera_status, frame_broadcast) = if pre_configured {
-        let (cam_status, cam_broadcast, cam_connected_rx) =
-            spawn_frame_grabber(config.printer.ip.clone(), frame_buffer.clone());
-        info!("frame grabber started for {}", config.printer.ip);
+    let (camera_ip_tx, camera_ip_rx) = watch::channel(config.printer.ip.clone());
+    let camera_ip_tx = Arc::new(camera_ip_tx);
 
+    let (camera_status, frame_broadcast, cam_connected_rx) =
+        spawn_frame_grabber(camera_ip_rx, frame_buffer.clone());
+    info!("frame grabber started (ip={})", config.printer.ip);
+
+    {
         let watcher_state = manager_state.clone();
         let watcher_changed = state_changed_tx.clone();
         tokio::spawn(async move {
@@ -95,29 +140,20 @@ async fn main() {
                 let _ = watcher_changed.send(());
             }
         });
+    }
 
-        (cam_status, cam_broadcast)
-    } else {
-        let (tx, _) = tokio::sync::broadcast::channel(8);
-        (
-            std::sync::Arc::new(camera::CameraStatus::default()),
-            std::sync::Arc::new(tx),
-        )
-    };
-
-    if pre_configured {
-
+    {
         let det_engine = detection::engine::DetectionEngine::new(
             config.detection.clone(),
             config.server.port,
             frame_buffer.clone(),
+            Some(db.clone()),
         );
 
         let det_enabled_rx_clone = det_enabled_rx.clone();
         let det_config_rx_clone = det_config_rx.clone();
         let det_state = manager_state.clone();
         let det_state_changed = state_changed_tx.clone();
-
         let det_manager = manager_arc.clone();
         tokio::spawn(async move {
             let (_shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -125,15 +161,11 @@ async fn main() {
                 .run(det_state, det_manager, det_enabled_rx_clone, det_config_rx_clone, shutdown_rx, det_state_changed)
                 .await;
         });
-
         info!("detection engine started");
     }
 
     {
-        let notif_state_rx = {
-            let manager = manager_arc.lock().await;
-            manager.state_changed_rx()
-        };
+        let notif_state_rx = manager_arc.state_changed_rx();
         let notif_manager = notifications::manager::NotificationManager::new(
             manager_state.clone(),
             config_arc.clone(),
@@ -155,6 +187,8 @@ async fn main() {
         frame_buffer,
         camera_status,
         frame_broadcast,
+        db,
+        camera_ip_tx,
     );
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
@@ -174,6 +208,14 @@ async fn main() {
     if let Err(e) = axum::serve(listener, router).await {
         error!("server error: {e}");
         std::process::exit(1);
+    }
+}
+
+fn event_kind_str_for_db(kind: &EventKind) -> String {
+    match kind {
+        EventKind::Loaded(s) => s.clone(),
+        EventKind::PhaseChanged(code, s) => format!("PhaseChanged({code},{s})"),
+        other => format!("{other:?}"),
     }
 }
 

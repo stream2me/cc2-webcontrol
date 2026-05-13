@@ -9,7 +9,6 @@ use crate::config::ExcludeZone;
 use crate::detection::grouping;
 use crate::detection::obico::ObicoClient;
 use crate::error::AppError;
-use crate::printer::state::PrinterState;
 
 #[derive(serde::Serialize)]
 pub struct DetectionStatusResponse {
@@ -37,10 +36,19 @@ pub async fn toggle(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {
     let current = *state.det_enabled_rx.borrow();
-    state.det_enabled_tx.send(!current).map_err(|_| {
+    let new_val = !current;
+    state.det_enabled_tx.send(new_val).map_err(|_| {
         AppError::Detection(crate::error::DetectionError::NotRunning)
     })?;
-    debug!("API: detection toggled to {}", !current);
+    let det_to_save = {
+        let mut cfg = state.config.write().await;
+        cfg.detection.enabled = new_val;
+        cfg.detection.clone()
+    };
+    if let Err(e) = crate::db::save_detection_config(&state.db, &det_to_save).await {
+        warn!("failed to persist detection enabled: {e}");
+    }
+    debug!("API: detection toggled to {new_val}");
     Ok(Json(Value::Null))
 }
 
@@ -56,36 +64,32 @@ pub async fn update_config(
     State(state): State<AppState>,
     Json(req): Json<DetectionConfigRequest>,
 ) -> Result<Json<Value>, AppError> {
-    let mut config = state.det_config_rx.borrow().clone();
+    let det_to_save = {
+        let mut cfg = state.config.write().await;
+        if let Some(v) = req.notify_threshold { cfg.detection.notify_threshold = v.clamp(0.0, 1.0); }
+        if let Some(v) = req.pause_threshold { cfg.detection.pause_threshold = v.clamp(0.0, 1.0); }
+        if let Some(v) = req.interval_secs { cfg.detection.interval_secs = v.max(5); }
+        if let Some(v) = req.confirmation_frames { cfg.detection.confirmation_frames = v.max(1); }
 
-    if let Some(v) = req.notify_threshold {
-        config.notify_threshold = v.clamp(0.0, 1.0);
-    }
-    if let Some(v) = req.pause_threshold {
-        config.pause_threshold = v.clamp(0.0, 1.0);
-    }
-    if let Some(interval_secs) = req.interval_secs {
-        config.interval_secs = interval_secs.max(5);
-    }
-    if let Some(confirmation_frames) = req.confirmation_frames {
-        config.confirmation_frames = confirmation_frames.max(1);
-    }
+        if cfg.detection.pause_threshold < cfg.detection.notify_threshold {
+            return Err(AppError::Validation(
+                "pause_threshold must be >= notify_threshold".to_string(),
+            ));
+        }
+        cfg.detection.clone()
+    };
 
-    if config.pause_threshold < config.notify_threshold {
-        return Err(AppError::Validation(
-            "pause_threshold must be >= notify_threshold".to_string(),
-        ));
-    }
-
-    state.det_config_tx.send(config).map_err(|_| {
+    state.det_config_tx.send(det_to_save.clone()).map_err(|_| {
         AppError::Detection(crate::error::DetectionError::NotRunning)
     })?;
+    if let Err(e) = crate::db::save_detection_config(&state.db, &det_to_save).await {
+        warn!("failed to persist detection config: {e}");
+    }
 
     debug!("API: detection config updated");
     Ok(Json(Value::Null))
 }
 
-/// detection history
 #[derive(Deserialize)]
 pub struct HistoryQuery {
     pub filename: Option<String>,
@@ -93,18 +97,21 @@ pub struct HistoryQuery {
 }
 
 pub async fn get_history(
+    State(state): State<AppState>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let limit = q.limit.unwrap_or(200).min(500);
-    let mut points = PrinterState::load_detection_history(limit);
-    if let Some(ref filename) = q.filename {
-        points.retain(|p| p.print_filename.as_deref() == Some(filename.as_str()));
-    }
-    let pts: Vec<_> = points.into_iter().collect();
+    let max_graph_pts = q.limit.unwrap_or(300).min(300);
+    let raw_limit = if q.filename.is_some() { 20_000 } else { 5_000 };
+    let points = crate::db::query_detection_points(
+        &state.db,
+        q.filename.as_deref(),
+        raw_limit,
+    )
+    .await;
+    let pts = crate::db::downsample_for_graph(&points, max_graph_pts);
     Ok(Json(serde_json::to_value(&pts).unwrap_or(Value::Array(vec![]))))
 }
 
-/// latest detection
 pub async fn get_latest(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {
@@ -116,21 +123,25 @@ pub async fn get_latest(
     })))
 }
 
-/// set zones
 pub async fn set_zones(
     State(state): State<AppState>,
     Json(zones): Json<Vec<ExcludeZone>>,
 ) -> Result<Json<Value>, AppError> {
-    let mut config = state.det_config_rx.borrow().clone();
-    config.exclude_zones = zones;
-    state.det_config_tx.send(config).map_err(|_| {
+    let det_to_save = {
+        let mut cfg = state.config.write().await;
+        cfg.detection.exclude_zones = zones;
+        cfg.detection.clone()
+    };
+    state.det_config_tx.send(det_to_save.clone()).map_err(|_| {
         AppError::Detection(crate::error::DetectionError::NotRunning)
     })?;
+    if let Err(e) = crate::db::save_detection_config(&state.db, &det_to_save).await {
+        warn!("failed to persist detection zones: {e}");
+    }
     debug!("API: exclusion zones updated");
     Ok(Json(Value::Null))
 }
 
-/// grouped detection points
 #[derive(Deserialize)]
 pub struct GroupedQuery {
     pub filename: Option<String>,
@@ -139,20 +150,21 @@ pub struct GroupedQuery {
 }
 
 pub async fn get_grouped(
+    State(state): State<AppState>,
     Query(q): Query<GroupedQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let limit = q.limit.unwrap_or(500).min(1000);
+    let limit = q.limit.unwrap_or(20_000).min(20_000);
     let window_secs = q.window_secs.unwrap_or(300);
-    let mut points = PrinterState::load_detection_history(limit);
-    if let Some(ref filename) = q.filename {
-        points.retain(|p| p.print_filename.as_deref() == Some(filename.as_str()));
-    }
-    let pts: Vec<_> = points.into_iter().collect();
-    let groups = grouping::group_detection_points(&pts, window_secs, 0.4);
+    let points = crate::db::query_detection_points(
+        &state.db,
+        q.filename.as_deref(),
+        limit,
+    )
+    .await;
+    let groups = grouping::group_detection_points(&points, window_secs, 0.4);
     Ok(Json(serde_json::to_value(&groups).unwrap_or(Value::Array(vec![]))))
 }
 
-/// run detection
 pub async fn run_detection(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {

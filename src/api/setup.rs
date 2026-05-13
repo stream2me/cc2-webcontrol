@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use super::router::AppState;
 use crate::config::validate_pincode;
@@ -100,50 +100,59 @@ pub async fn complete_onboarding(
     }
 
     if let Some(n) = req.notifications {
-        if let Some(dests) = n.destinations {
+        if let Some(mut dests) = n.destinations {
+            for dest in &mut dests {
+                if dest.id.is_empty() {
+                    dest.id = {
+                        use rand::Rng;
+                        format!("{:08x}", rand::thread_rng().gen::<u32>())
+                    };
+                }
+            }
             config.notifications.destinations = dests;
         }
     }
 
     config.onboarding_complete = true;
 
-    if let Err(e) = config.save("config.toml") {
-        warn!("failed to persist onboarding config: {e}");
-        return Err(AppError::Config(crate::error::ConfigError::Load(
-            config::ConfigError::Message(format!("failed to save onboarding: {e}")),
-        )));
+    let detection_cfg = config.detection.clone();
+    let dests = config.notifications.destinations.clone();
+    let host = config.server.host.clone();
+    let port = config.server.port;
+    let log_level = config.logging.level.clone();
+    drop(config);
+
+    crate::db::save_detection_config(&state.db, &detection_cfg).await
+        .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
+    crate::db::save_server_config(&state.db, &host, port, &log_level, true).await
+        .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
+    for dest in &dests {
+        crate::db::upsert_destination(&state.db, dest).await
+            .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
     }
 
-    info!("onboarding complete + config saved");
+    info!("onboarding complete + config saved to db");
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
 pub async fn reset_setup(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
-    {
-        let mut manager = state.manager.lock().await;
-        manager.shutdown().await;
-    }
+    state.manager.shutdown().await;
 
     let defaults = crate::config::AppConfig::default();
 
     {
         let mut config = state.config.write().await;
         *config = defaults.clone();
-        if let Err(e) = config.save("config.toml") {
-            warn!("failed to persist reset config: {e}");
-            return Err(AppError::Config(crate::error::ConfigError::Load(
-                config::ConfigError::Message(format!("failed to save reset: {e}")),
-            )));
-        }
     }
+
+    crate::db::reset_config(&state.db).await
+        .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
 
     let _ = state.det_enabled_tx.send(defaults.detection.enabled);
     let _ = state.det_config_tx.send(defaults.detection.clone());
+    let _ = state.camera_ip_tx.send(String::new());
 
-    {
-        let mut manager = state.manager.lock().await;
-        manager.update_config(defaults);
-    }
+    state.manager.update_config(defaults).await;
 
     info!("all settings reset to defaults");
     Ok(Json(serde_json::json!({ "success": true })))
@@ -337,25 +346,25 @@ pub async fn save_config(
         config.printer.ip = req.ip.clone();
         config.printer.printer_id = req.printer_id.clone();
         config.printer.pincode = pincode;
-        if let Err(e) = config.save("config.toml") {
-            error!("failed to persist config to disk: {e}");
-            return Err(AppError::Config(crate::error::ConfigError::Load(
-                config::ConfigError::Message(format!("failed to save config: {e}")),
-            )));
-        }
-        info!("config saved to config.toml");
+        let printer_cfg = config.printer.clone();
+        drop(config);
+        crate::db::save_printer_config(&state.db, &printer_cfg).await
+            .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
+        info!("printer config saved to db");
     }
 
     let config_snapshot = state.config.read().await.clone();
-    let mut manager = state.manager.lock().await;
-    manager.update_config(config_snapshot);
+    state.manager.update_config(config_snapshot).await;
 
-    if let Err(e) = manager.start().await {
+    if let Err(e) = state.manager.start().await {
         error!("failed to start printer manager after setup: {e}");
         return Err(AppError::Setup(SetupError::VerificationFailed(
             format!("Failed to start printer connection: {e}"),
         )));
     }
+
+    // camera loop must retarget after setup save
+    let _ = state.camera_ip_tx.send(req.ip.clone());
 
     info!("printer manager started after setup for {}", req.ip);
     Ok(Json(serde_json::json!({ "success": true })))

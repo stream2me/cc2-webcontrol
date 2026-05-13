@@ -5,11 +5,20 @@ const BASE = '';
 async function apiError(res: Response, context: string): Promise<never> {
   let message = context;
   try {
-    const body = await res.json();
-    if (body?.error) message = body.error;
-  } catch {
-    const text = await res.text().catch(() => '');
-    if (text) message = text;
+    const text = await res.text();
+    console.error(`[api] ${context}: HTTP ${res.status}, body: ${JSON.stringify(text)}`);
+    if (text) {
+      try {
+        const body = JSON.parse(text);
+        if (body?.error) message = body.error;
+        else if (body?.message) message = body.message;
+        else message = text;
+      } catch {
+        message = text;
+      }
+    }
+  } catch (bodyErr) {
+    console.error(`[api] ${context}: HTTP ${res.status}, body read failed:`, bodyErr);
   }
   throw new Error(message);
 }
@@ -46,11 +55,21 @@ export interface EventToggles {
   print_started: boolean;
   print_finished: boolean;
   print_paused: boolean;
+  print_resumed: boolean;
+  print_stopped: boolean;
+  print_finished_ok: boolean;
   failure_notify: boolean;
   failure_pause: boolean;
   auto_paused: boolean;
   camera_lost: boolean;
   camera_restored: boolean;
+  emergency_stop: boolean;
+  machine_error: boolean;
+  id_not_match: boolean;
+  auth_error: boolean;
+  connected: boolean;
+  disconnected: boolean;
+  detection_engine_error: boolean;
 }
 
 export type DestinationKind = 'ntfy' | 'discord' | 'webhook';
@@ -62,6 +81,7 @@ export interface NotificationDestination {
   label: string;
   ntfy_server?: string;
   ntfy_topic?: string;
+  ntfy_tap_url?: string;
   discord_webhook_url?: string;
   webhook_url?: string;
   toggles: EventToggles;
@@ -72,11 +92,21 @@ export function defaultToggles(): EventToggles {
     print_started: true,
     print_finished: true,
     print_paused: true,
+    print_resumed: true,
+    print_stopped: true,
+    print_finished_ok: true,
     failure_notify: true,
     failure_pause: true,
     auto_paused: true,
     camera_lost: true,
     camera_restored: true,
+    emergency_stop: true,
+    machine_error: true,
+    id_not_match: true,
+    auth_error: true,
+    connected: true,
+    disconnected: true,
+    detection_engine_error: true,
   };
 }
 
@@ -192,6 +222,16 @@ export async function stopPrint(): Promise<void> {
   if (!res.ok) await apiError(res, 'Failed to stop print');
 }
 
+export async function homeAxes(axes: 'x' | 'y' | 'z' | 'xyz'): Promise<void> {
+  const res = await postJson(`${BASE}/api/printer/home`, { axes });
+  if (!res.ok) await apiError(res, 'Failed to home axes');
+}
+
+export async function jogAxis(axis: 'x' | 'y' | 'z', distance: number): Promise<void> {
+  const res = await postJson(`${BASE}/api/printer/jog`, { axis, distance });
+  if (!res.ok) await apiError(res, 'Failed to jog axis');
+}
+
 export async function setLed(power: boolean): Promise<void> {
   const res = await postJson(`${BASE}/api/printer/led`, { power: power ? 1 : 0 });
   if (!res.ok) await apiError(res, 'Failed to set LED');
@@ -210,6 +250,8 @@ export async function setSpeedMode(mode: number): Promise<void> {
 export interface StartPrintOptions {
   plate?: 'textured' | 'smooth';
   tray_id?: number | null;
+  tray_slot?: number | null;
+  canvas_id?: number;
   timelapse?: boolean;
   bedlevel_force?: boolean;
 }
@@ -220,14 +262,16 @@ export async function startPrint(filename: string, storage_media: string = 'loca
     storage_media,
     plate: opts.plate ?? 'textured',
     tray_id: opts.tray_id ?? null,
+    tray_slot: opts.tray_slot ?? null,
+    canvas_id: opts.canvas_id ?? 0,
     timelapse: opts.timelapse ?? false,
     bedlevel_force: opts.bedlevel_force ?? true,
   });
   if (!res.ok) await apiError(res, 'Failed to start print');
 }
 
-export async function getFiles(storage: string = 'local', offset: number = 0, limit: number = 20): Promise<void> {
-  const res = await fetch(`${BASE}/api/printer/files?storage=${storage}&offset=${offset}&limit=${limit}`);
+export async function getFiles(storage: string = 'local', pageNumber: number = 1, pageSize: number = 50): Promise<void> {
+  const res = await fetch(`${BASE}/api/printer/files?storage=${storage}&page_number=${pageNumber}&page_size=${pageSize}`);
   if (!res.ok) await apiError(res, 'Failed to get file list');
 }
 
@@ -235,7 +279,10 @@ export async function uploadGcode(file: File): Promise<{ ok: boolean; bytes: num
   const buf = await file.arrayBuffer();
   const res = await fetch(`${BASE}/api/printer/upload`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-File-Name': file.name,
+    },
     body: buf,
   });
   if (!res.ok) await apiError(res, 'Upload failed');
@@ -266,10 +313,33 @@ export async function refreshCanvas(): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+export async function setCanvasAutoRefill(enabled: boolean): Promise<void> {
+  const res = await postJson(`${BASE}/api/printer/canvas/auto-refill`, { enabled });
+  if (!res.ok) await apiError(res, 'Failed to set auto-refill');
+}
+
 export async function getThumbnail(filename: string, storage = 'local'): Promise<{ thumbnail: string }> {
   const u = `${BASE}/api/printer/thumbnail?storage=${encodeURIComponent(storage)}&filename=${encodeURIComponent(filename)}`;
   const res = await fetch(u);
   if (!res.ok) await apiError(res, 'Failed to get thumbnail');
+  return res.json();
+}
+
+export interface FileDetail {
+  filename?: string;
+  file_name?: string;
+  print_time?: number;
+  total_layer?: number;
+  total_filament_used?: number;
+  thumbnail?: string;
+  error_code?: number;
+  [key: string]: unknown;
+}
+
+export async function getFileDetail(filename: string, storage = 'local'): Promise<FileDetail> {
+  const u = `${BASE}/api/printer/file-detail?storage=${encodeURIComponent(storage)}&filename=${encodeURIComponent(filename)}`;
+  const res = await fetch(u);
+  if (!res.ok) await apiError(res, 'Failed to get file detail');
   return res.json();
 }
 

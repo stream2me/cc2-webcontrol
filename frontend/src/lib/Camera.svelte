@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { Camera as CameraIcon, Maximize2, Minimize2 } from 'lucide-svelte';
   import { printer, showToast } from '../stores';
+  import offlineImg from '../assets/cc2-offline.png';
   import { getLatestDetection, setExcludeZones } from '../api';
   import { toErrorMessage } from './errors';
   import type { DetectionBox, ExcludeZone } from '../api';
@@ -28,7 +29,7 @@
   $: connected = $printer.connected;
   $: cameraConnected = $printer.camera_connected;
 
-  // stream is always server-relative — works on any network
+  // server-relative path avoids LAN mismatch
   $: streamUrl = connected ? '/api/camera/stream' : '';
   $: if (connected) imgError = false;
 
@@ -80,7 +81,7 @@
 
   function onImgError() {
     imgError = true;
-    // retry after 3s — handles transient server restarts
+    // retry after 3s for transient restarts
     if (reconnectTimer !== null) return;
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
@@ -294,16 +295,18 @@
         {/if}
       {:else}
         <div class="placeholder">
-          <span class="placeholder-icon"><CameraIcon size={32} strokeWidth={1.7} /></span>
-          <span>
-            {#if !connected}
-              Waiting for printer…
-            {:else if imgError}
-              Camera unavailable · retrying…
-            {:else}
-              Connecting to camera…
-            {/if}
-          </span>
+          {#if !connected}
+            <img src={offlineImg} alt="Printer offline" class="offline-img" />
+          {:else}
+            <span class="placeholder-icon"><CameraIcon size={32} strokeWidth={1.7} /></span>
+            <span>
+              {#if imgError}
+                Camera unavailable · retrying…
+              {:else}
+                Connecting to camera…
+              {/if}
+            </span>
+          {/if}
         </div>
       {/if}
       <button class="fs-btn" on:click={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
@@ -487,5 +490,12 @@
     font-size: 12px;
     opacity: 0.6;
     text-align: center;
+  }
+  .offline-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.55;
+    filter: grayscale(1);
   }
 </style>

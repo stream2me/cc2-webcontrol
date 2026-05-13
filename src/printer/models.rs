@@ -1,17 +1,21 @@
 //! mqtt models
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RpcResponse {
+    #[serde(default)]
     pub id: u64,
+    #[serde(default)]
     pub method: u16,
+    #[serde(default)]
     pub result: RpcResult,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RpcResult {
+    // printer omits error_code on some responses
+    #[serde(default)]
     pub error_code: u16,
     #[serde(flatten)]
     pub data: serde_json::Value,
@@ -116,8 +120,17 @@ pub struct Led {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExceptionEntry {
+    pub code: i64,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub recovery: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MachineStatus {
-    pub exception_status: Option<Vec<serde_json::Value>>,
+    pub exception_status: Option<Vec<ExceptionEntry>>,
     pub progress: i64,
     pub status: i64,
     pub sub_status: i64,
@@ -150,158 +163,14 @@ pub struct ZTemperatureSensor {
     pub temperature: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StartPrintParams {
-    pub filename: String,
-    pub storage_media: String,
-    pub config: StartPrintConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StartPrintConfig {
-    pub bedlevel_force: bool,
-    pub delay_video: bool,
-    pub print_layout: String,
-    pub printer_check: bool,
-    pub slot_map: Vec<SlotMapEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlotMapEntry {
-    pub canvas_id: i64,
-    pub t: i64,
-    pub tray_id: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SetLedParams {
-    pub power: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SetFanParams {
-    #[serde(flatten)]
-    pub fan_map: serde_json::Value,
-}
-
-impl SetFanParams {
-    pub fn single(name: &str, speed: i64) -> Self {
-        Self {
-            fan_map: serde_json::json!({ name: speed }),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SetSpeedModeParams {
-    pub mode: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetFileListParams {
-    pub storage_media: String,
-    pub offset: i64,
-    pub limit: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileListResponse {
-    pub error_code: u16,
-    pub file_list: Vec<FileEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileEntry {
-    pub color_map: Option<Vec<ColorMapEntry>>,
-    pub create_time: Option<i64>,
-    pub filename: String,
-    pub last_print_time: Option<i64>,
-    pub layer: Option<i64>,
-    pub print_time: Option<i64>,
-    pub size: Option<i64>,
-    pub total_filament_used: Option<f64>,
-    pub total_print_times: Option<i64>,
-    #[serde(rename = "type")]
-    pub entry_type: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColorMapEntry {
-    pub color: String,
-    pub name: String,
-    pub t: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetFileInfoParams {
-    pub storage_media: String,
-    pub filename: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrintHistoryResponse {
-    pub error_code: u16,
-    pub history_task_list: Vec<HistoryTask>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HistoryTask {
-    pub begin_time: i64,
-    pub end_time: i64,
-    pub task_id: String,
-    pub task_name: String,
-    pub task_status: i64,
-    pub time_lapse_video_duration: i64,
-    pub time_lapse_video_size: i64,
-    pub time_lapse_video_status: i64,
-    pub time_lapse_video_url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SetAMSAutoRefillParams {
-    pub auto_refill: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AMSInfoResponse {
-    pub error_code: u16,
-    pub canvas_info: CanvasInfo,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanvasInfo {
-    pub active_canvas_id: i64,
-    pub active_tray_id: i64,
-    pub auto_refill: bool,
-    pub canvas_list: Vec<CanvasEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanvasEntry {
-    pub canvas_id: i64,
-    pub connected: i64,
-    pub tray_list: Vec<TrayEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrayEntry {
-    pub brand: String,
-    pub filament_code: String,
-    pub filament_color: String,
-    pub filament_name: String,
-    pub filament_type: String,
-    pub max_nozzle_temp: i64,
-    pub min_nozzle_temp: i64,
-    pub status: i64,
-    pub tray_id: i64,
-}
-
 pub const METHOD_GET_DEVICE_INFO: u16 = 1001;
 pub const METHOD_GET_FULL_STATUS: u16 = 1002;
 pub const METHOD_START_PRINT: u16 = 1020;
 pub const METHOD_PAUSE_PRINT: u16 = 1021;
 pub const METHOD_STOP_PRINT: u16 = 1022;
 pub const METHOD_RESUME_PRINT: u16 = 1023;
+pub const METHOD_HOME_AXES: u16 = 1026;
+pub const METHOD_JOG_AXIS: u16 = 1027;
 pub const METHOD_SET_LED: u16 = 1029;
 pub const METHOD_SET_FAN: u16 = 1030;
 pub const METHOD_SET_SPEED_MODE: u16 = 1031;
@@ -312,7 +181,3 @@ pub const METHOD_GET_FILE_INFO: u16 = 1046;
 pub const METHOD_SET_AMS_AUTO_REFILL: u16 = 2004;
 pub const METHOD_GET_AMS_INFO: u16 = 2005;
 pub const METHOD_STATUS_PUSH: u16 = 6000;
-
-pub const ERROR_SUCCESS: u16 = 0;
-pub const ERROR_LOCKED: u16 = 1009;
-pub const ERROR_WRONG_STATE: u16 = 1010;

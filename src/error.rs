@@ -38,10 +38,18 @@ pub enum SetupError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        if let AppError::Printer(PrinterError::CommandFailed { error_code, .. }) = &self {
+            let (status, msg) = match *error_code {
+                1009 => (StatusCode::CONFLICT, "Printer Busy"),
+                1010 => (StatusCode::CONFLICT, "Cannot perform this action while the printer is busy"),
+                _ => (StatusCode::BAD_REQUEST, "Command was rejected by the printer"),
+            };
+            return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+        }
+
         let status = match &self {
             AppError::Printer(PrinterError::NotConnected) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::Printer(PrinterError::RpcTimeout) => StatusCode::GATEWAY_TIMEOUT,
-            AppError::Printer(PrinterError::CommandFailed { .. }) => StatusCode::BAD_REQUEST,
             AppError::Config(_) => StatusCode::BAD_REQUEST,
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Setup(SetupError::InvalidPincode) => StatusCode::BAD_REQUEST,
@@ -49,24 +57,17 @@ impl IntoResponse for AppError {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        let body = Json(serde_json::json!({ "error": self.to_string() }));
-        (status, body).into_response()
+        (status, Json(serde_json::json!({ "error": self.to_string() }))).into_response()
     }
 }
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("failed to load config: {0}")]
-    Load(#[source] config::ConfigError),
-
-    #[error("invalid printer IP address: {0}")]
-    InvalidIp(String),
+    #[error("database error: {0}")]
+    Db(#[from] sqlx::Error),
 
     #[error("invalid pincode: must be 6 uppercase characters")]
     InvalidPincode,
-
-    #[error("invalid detection threshold: must be between 0.0 and 1.0")]
-    InvalidThreshold,
 }
 
 #[derive(Error, Debug)]
@@ -84,7 +85,6 @@ pub enum PrinterError {
     NotConnected,
 
     // cmd non-zero code
-    #[allow(dead_code)]
     #[error("command failed: method {method}, error_code {error_code}")]
     CommandFailed { method: u16, error_code: u16 },
 

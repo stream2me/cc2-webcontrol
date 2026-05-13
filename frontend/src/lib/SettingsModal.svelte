@@ -14,7 +14,8 @@
   const dispatch = createEventDispatcher<{ close: void }>();
 
   type Section = 'general' | 'detection' | 'notifications' | 'logs' | 'danger';
-  let activeSection: Section = 'general';
+  export let initialSection: string = 'general';
+  let activeSection: Section = (initialSection as Section) || 'general';
 
   let settings: AppSettings = {
     printer: { ip: '', printer_id: '', pincode: '' },

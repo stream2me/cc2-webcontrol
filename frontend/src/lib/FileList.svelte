@@ -21,7 +21,7 @@
     loading = true;
     error = '';
     try {
-      await getFiles('local', 0, 50);
+      await getFiles('local', 1, 50);
     } catch (e) {
       error = toErrorMessage(e);
     } finally {
@@ -62,7 +62,7 @@
     loading = true;
     usbError = '';
     try {
-      await getFiles('udisk', 0, 50);
+      await getFiles('udisk', 1, 50);
     } catch (e) {
       usbError = toErrorMessage(e);
     } finally {
@@ -82,11 +82,14 @@
       await startPrint(opts.filename, storage, {
         plate: opts.plate,
         tray_id: opts.selectedTrayId,
+        tray_slot: opts.selectedSlotIndex,
+        canvas_id: opts.selectedCanvasId,
         timelapse: opts.timelapse,
         bedlevel_force: opts.heatedBedLevel,
       });
+      showToast('Print started', 'info', 3000);
     } catch (e) {
-      showToast(toErrorMessage(e));
+      showToast(toErrorMessage(e), 'error', 6000);
     }
   }
 

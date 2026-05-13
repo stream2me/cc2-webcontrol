@@ -1,17 +1,35 @@
-FROM rust:1.94-bullseye AS builder
-
+# keep toolchain stable across stages
+FROM rust:1.94-bullseye AS base
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
-
+RUN cargo install cargo-chef
 WORKDIR /src
+
+# split recipe stage to maximize layer reuse
+FROM base AS planner
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+# cache deps without app sources
+FROM base AS cacher
+COPY --from=planner /src/recipe.json recipe.json
+# avoid build.rs frontend requirement in dep cache
+ENV SKIP_FRONTEND_BUILD=1
+RUN cargo chef cook --release --locked --recipe-path recipe.json
+
+# final binary build with frontend assets present
+FROM base AS builder
+COPY --from=cacher /src/target target
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
 COPY frontend ./frontend
 RUN cargo build --release --locked
 
+# runtime image already includes ML API
 FROM ghcr.io/thespaghettidetective/ml_api:latest
 
 RUN apt-get update \

@@ -25,9 +25,15 @@ pub async fn send(dest: &NotificationDestination, title: &str, body: &str) -> Re
         .build()
         .unwrap_or_default();
 
-    let res = client
+    let mut req = client
         .post(&url)
-        .header("Title", title)
+        .header("Title", title);
+
+    if let Some(tap_url) = dest.ntfy_tap_url.as_deref().filter(|u| !u.is_empty()) {
+        req = req.header("Click", tap_url);
+    }
+
+    let res = req
         .body(body.to_string())
         .send()
         .await

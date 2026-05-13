@@ -17,6 +17,9 @@
   $: isPrinting = printState === 'printing';
   $: isPaused = printState === 'paused';
   $: isActive = isPrinting || isPaused;
+  $: phaseInfo = $printer.phase ?? { label: $printer.connected ? 'Idle' : 'Offline', variant: $printer.connected ? 'idle' : 'error' };
+  $: phaseLabel = phaseInfo.label;
+  $: phaseVariant = phaseInfo.variant;
 
   let stopping = false;
   let error = '';
@@ -160,13 +163,7 @@
       <div class="job-top-row">
         <span class="filename" title={filename}>{shortName(filename)}</span>
         <div class="job-badges">
-          {#if isPrinting}
-            <span class="badge printing">Printing</span>
-          {:else if isPaused}
-            <span class="badge paused">Paused</span>
-          {:else}
-            <span class="badge idle">Idle</span>
-          {/if}
+          <span class="badge {phaseVariant}">{phaseLabel}</span>
         </div>
       </div>
 
@@ -319,10 +316,34 @@
     border: 1px solid rgba(240,160,48,0.3);
   }
 
+  .badge.pausing {
+    background: rgba(240,160,48,0.08);
+    color: var(--warning);
+    border: 1px solid rgba(240,160,48,0.3);
+    animation: pulse-pausing 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-pausing {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
   .badge.idle {
     background: var(--surface2);
     color: var(--muted);
     border: 1px solid var(--border);
+  }
+
+  .badge.error {
+    background: var(--danger-dim);
+    color: var(--danger);
+    border: 1px solid rgba(232,69,90,0.35);
+  }
+
+  .badge.special {
+    background: rgba(45,135,240,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(45,135,240,0.3);
   }
 
   .progress-row {

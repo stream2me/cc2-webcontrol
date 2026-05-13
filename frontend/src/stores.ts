@@ -8,6 +8,7 @@ export interface Toast {
 
 let _toastId = 0;
 export const toasts = writable<Toast[]>([]);
+export const requestOpenSettings = writable<string | null>(null);
 
 export function showToast(message: string, type: Toast['type'] = 'error', duration = 4000) {
   const id = ++_toastId;
@@ -49,12 +50,18 @@ export interface PrinterFile {
   [key: string]: unknown;
 }
 
+export interface PhaseInfo {
+  label: string;
+  variant: string;
+}
+
 export interface PrinterState {
   connected: boolean;
   printer_id: string;
   printer_ip: string;
   camera_connected: boolean;
   state: FullStatus | null;
+  phase?: PhaseInfo;
   detection_score: number;
   detection_history: DetectionPoint[];
   nozzle_history: number[];
@@ -170,6 +177,7 @@ export interface ZTemperatureSensor {
 export interface AppEvent {
   kind: string;
   description: string;
+  ts?: number;
 }
 
 export interface DetectionStatus {
@@ -186,6 +194,7 @@ export const printer = writable<PrinterState>({
   printer_ip: '',
   camera_connected: false,
   state: null,
+  phase: undefined,
   detection_score: 0,
   detection_history: [],
   nozzle_history: [],

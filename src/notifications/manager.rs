@@ -94,13 +94,25 @@ impl NotificationManager {
 fn event_kind_label(kind: &EventKind) -> &'static str {
     match kind {
         EventKind::PrintStarted => "print_started",
-        EventKind::PrintFinished => "print_finished",
+        EventKind::PrintFinished => "print_finished_ok",
         EventKind::PrintPaused => "print_paused",
+        EventKind::PrintResumed => "print_resumed",
+        EventKind::PrintStopped => "print_stopped",
         EventKind::FailureNotifyThreshold => "failure_notify",
         EventKind::FailurePauseThreshold => "failure_pause",
         EventKind::AutoPaused => "auto_paused",
         EventKind::CameraLost => "camera_lost",
         EventKind::CameraRestored => "camera_restored",
+        EventKind::Connected => "connected",
+        EventKind::Disconnected => "disconnected",
+        EventKind::PhaseChanged(code, _) => match code {
+            19 => "emergency_stop",
+            999 => "machine_error",
+            1000 => "id_not_match",
+            1001 => "auth_error",
+            _ => "other",
+        },
+        EventKind::DetectionEngineError => "detection_engine_error",
         _ => "other",
     }
 }
@@ -108,13 +120,25 @@ fn event_kind_label(kind: &EventKind) -> &'static str {
 fn event_matches_toggles(kind: &EventKind, t: &EventToggles) -> bool {
     match kind {
         EventKind::PrintStarted => t.print_started,
-        EventKind::PrintFinished => t.print_finished,
+        EventKind::PrintFinished => t.print_finished_ok,
         EventKind::PrintPaused => t.print_paused,
+        EventKind::PrintResumed => t.print_resumed,
+        EventKind::PrintStopped => t.print_stopped,
         EventKind::FailureNotifyThreshold => t.failure_notify,
         EventKind::FailurePauseThreshold => t.failure_pause,
         EventKind::AutoPaused => t.auto_paused,
         EventKind::CameraLost => t.camera_lost,
         EventKind::CameraRestored => t.camera_restored,
+        EventKind::Connected => t.connected,
+        EventKind::Disconnected => t.disconnected,
+        EventKind::PhaseChanged(code, _) => match code {
+            19 => t.emergency_stop,
+            999 => t.machine_error,
+            1000 => t.id_not_match,
+            1001 => t.auth_error,
+            _ => false,
+        },
+        EventKind::DetectionEngineError => t.detection_engine_error,
         _ => false,
     }
 }

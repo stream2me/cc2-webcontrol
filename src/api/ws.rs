@@ -1,24 +1,23 @@
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex as WsMutex, RwLock};
 use tracing::{debug, info, warn};
 
 use super::router::AppState;
-use crate::printer::state::{PrinterEvent, PrinterState};
+use crate::printer::state::{EventKind, PrinterEvent, PrinterState};
 
 pub async fn ws_handler(
     State(state): State<AppState>,
     ws: axum::extract::WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let (event_rx, state_changed_rx) = {
-        let manager = state.manager.lock().await;
-        (manager.event_rx(), manager.state_changed_rx())
-    };
+    let event_rx = state.manager.event_rx();
+    let state_changed_rx = state.manager.state_changed_rx();
     ws.on_upgrade(move |socket| {
         handle_socket(socket, state.printer_state.clone(), event_rx, state_changed_rx)
     })
@@ -31,7 +30,7 @@ async fn handle_socket(
     state_changed_rx: broadcast::Receiver<()>,
 ) {
     let (ws_sender, mut ws_receiver) = socket.split();
-    let sender = Arc::new(Mutex::new(ws_sender));
+    let sender = Arc::new(WsMutex::new(ws_sender));
 
     info!("websocket client connected");
 
@@ -56,19 +55,19 @@ async fn handle_socket(
         let mut fallback = tokio::time::interval(std::time::Duration::from_secs(30));
         fallback.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        let debounce = tokio::time::sleep(std::time::Duration::MAX);
+        tokio::pin!(debounce);
+        let mut state_dirty = false;
+
         loop {
             tokio::select! {
                 result = state_changed.recv() => {
                     match result {
                         Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                            let s = printer_state_clone.read().await;
-                            let msg = build_state_msg(&s);
-                            if let Ok(text) = serde_json::to_string(&msg) {
-                                let mut sender = sender_clone.lock().await;
-                                if sender.send(Message::Text(text)).await.is_err() {
-                                    break;
-                                }
-                            }
+                            state_dirty = true;
+                            debounce.as_mut().reset(
+                                tokio::time::Instant::now() + std::time::Duration::from_millis(200)
+                            );
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             warn!("[ws] state_changed channel closed");
@@ -77,14 +76,28 @@ async fn handle_socket(
                     }
                 }
 
+                () = &mut debounce, if state_dirty => {
+                    state_dirty = false;
+                    let s = printer_state_clone.read().await;
+                    let msg = build_state_msg(&s);
+                    if let Ok(text) = serde_json::to_string(&msg) {
+                        let mut sender = sender_clone.lock().await;
+                        if sender.send(Message::Text(text)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+
                 result = event_stream.recv() => {
                     match result {
                         Ok(event) => {
+                            let ts = event.timestamp.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                             let msg = json!({
                                 "type": "event",
                                 "data": {
-                                    "kind": format!("{:?}", event.kind),
+                                    "kind": event_kind_str(&event.kind),
                                     "description": event.description,
+                                    "ts": ts,
                                 }
                             });
                             if let Ok(text) = serde_json::to_string(&msg) {
@@ -105,6 +118,7 @@ async fn handle_socket(
                 }
 
                 _ = fallback.tick() => {
+                    state_dirty = false;
                     let s = printer_state_clone.read().await;
                     let msg = build_state_msg(&s);
                     if let Ok(text) = serde_json::to_string(&msg) {
@@ -145,17 +159,52 @@ async fn handle_socket(
     info!("websocket client disconnected");
 }
 
+fn event_kind_str(kind: &EventKind) -> &'static str {
+    match kind {
+        EventKind::PrintStarted => "print_started",
+        EventKind::PrintFinished => "print_finished",
+        EventKind::PrintPaused => "print_paused",
+        EventKind::PrintResumed => "print_resumed",
+        EventKind::PrintStopped => "print_stopped",
+        EventKind::FailureNotifyThreshold => "failure_notify",
+        EventKind::FailurePauseThreshold => "failure_pause",
+        EventKind::AutoPaused => "auto_paused",
+        EventKind::CameraLost => "camera_lost",
+        EventKind::CameraRestored => "camera_restored",
+        EventKind::Connected => "connected",
+        EventKind::Disconnected => "disconnected",
+        EventKind::ErrorOccurred => "error",
+        _ => "other",
+    }
+}
+
 fn build_state_msg(s: &PrinterState) -> serde_json::Value {
     let data = serde_json::to_value(&s.full).unwrap_or(json!({}));
     let det_history: Vec<_> = s.detection_history.iter().collect();
+    let start = s.events.len().saturating_sub(20);
+    let recent_events: Vec<_> = s.events[start..].iter().map(|e| {
+        let ts = e.timestamp.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        json!({
+            "kind": event_kind_str(&e.kind),
+            "description": e.description,
+            "ts": ts,
+        })
+    }).collect();
+    let phase = crate::printer::state::build_phase_info(
+        s.full.machine_status.status,
+        s.full.machine_status.sub_status,
+        &s.full.print_status.state,
+    );
     json!({
         "type": "state",
         "connected": s.connected,
         "printer_ip": s.printer_ip,
         "camera_connected": s.camera_connected,
         "data": data,
+        "phase": phase,
         "detection_score": s.detection_score,
         "detection_history": det_history,
         "files": s.files,
+        "events": recent_events,
     })
 }

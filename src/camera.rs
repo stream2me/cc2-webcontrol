@@ -7,7 +7,7 @@ use futures::StreamExt;
 use tokio::sync::{broadcast, watch, RwLock};
 use tracing::{debug, info, warn};
 
-/// jpeg frame buffer (used by detection engine)
+/// latest jpeg for API + detection
 pub type FrameBuffer = Arc<RwLock<Option<Vec<u8>>>>;
 pub type FrameBroadcast = Arc<broadcast::Sender<Bytes>>;
 pub type CameraConnectedRx = watch::Receiver<bool>;
@@ -34,7 +34,7 @@ impl Default for CameraStatus {
 }
 
 pub fn spawn_frame_grabber(
-    camera_ip: String,
+    mut ip_rx: watch::Receiver<String>,
     buffer: FrameBuffer,
 ) -> (Arc<CameraStatus>, FrameBroadcast, CameraConnectedRx) {
     let status = Arc::new(CameraStatus::new());
@@ -49,6 +49,17 @@ pub fn spawn_frame_grabber(
         let mut backoff = 2u64;
 
         loop {
+            let camera_ip = ip_rx.borrow_and_update().clone();
+
+            if camera_ip.is_empty() {
+                backoff = 2;
+                tokio::select! {
+                    res = ip_rx.changed() => { if res.is_err() { return; } }
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                }
+                continue;
+            }
+
             let url = format!("http://{}:8080/?action=stream", camera_ip);
             info!("[grabber] connecting to {url}");
 
@@ -76,9 +87,10 @@ pub fn spawn_frame_grabber(
                     let mut buf: Vec<u8> = Vec::with_capacity(128 * 1024);
                     let mut frames: u64 = 0;
 
-                    while let Some(chunk) = stream.next().await {
-                        match chunk {
-                            Ok(data) => {
+                    // 15s read timeout: MJPEG can stall without closing
+                    loop {
+                        match tokio::time::timeout(Duration::from_secs(15), stream.next()).await {
+                            Ok(Some(Ok(data))) => {
                                 buf.extend_from_slice(&data);
 
                                 while let Some(frame) = try_extract_frame(&mut buf) {
@@ -105,8 +117,14 @@ pub fn spawn_frame_grabber(
                                     buf.clear();
                                 }
                             }
-                            Err(e) => {
+                            Ok(Some(Err(e))) => {
                                 warn!("[grabber] stream error: {e}");
+                                break;
+                            }
+                            Ok(None) => break,
+                            Err(_) => {
+                                // firmware can stall stream without closing socket
+                                warn!("[grabber] read stalled (15s no data), reconnecting");
                                 break;
                             }
                         }

@@ -5,13 +5,12 @@ use std::time::Duration;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 use serde_json::Value;
 use tokio::sync::{broadcast, watch, RwLock};
-use tokio::time::interval;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use super::commands::Command;
 use super::models::{
-    DeviceInfo, FullStatus, RegisterRequest, RegisterResponse, RpcResponse,
-    METHOD_GET_AMS_INFO, METHOD_GET_DEVICE_INFO, METHOD_GET_FULL_STATUS, METHOD_STATUS_PUSH,
+    DeviceInfo, RegisterRequest, RegisterResponse, RpcResponse,
+    METHOD_GET_DEVICE_INFO,
 };
 use super::state::PrinterState;
 use crate::error::PrinterError;
@@ -70,15 +69,12 @@ impl MqttRawClient {
     ) -> Result<(), PrinterError> {
         let register_response_topic = format!("elegoo/{printer_id}/{client_id}_req/register_response");
         let api_response_topic = format!("elegoo/{printer_id}/{client_id}/api_response");
-        let api_status_topic = format!("elegoo/{printer_id}/api_status");
         let api_request_topic = format!("elegoo/{printer_id}/{client_id}/api_request");
         let api_register_topic = format!("elegoo/{printer_id}/api_register");
 
         client.subscribe(&register_response_topic, QoS::AtLeastOnce).await
             .map_err(|e| PrinterError::Registration(format!("subscribe failed: {e}")))?;
         client.subscribe(&api_response_topic, QoS::AtLeastOnce).await
-            .map_err(|e| PrinterError::Registration(format!("subscribe failed: {e}")))?;
-        client.subscribe(&api_status_topic, QoS::AtMostOnce).await
             .map_err(|e| PrinterError::Registration(format!("subscribe failed: {e}")))?;
 
         let register_payload = serde_json::to_string(&RegisterRequest {
@@ -94,9 +90,6 @@ impl MqttRawClient {
 
         debug!("raw client sent registration, waiting for response");
 
-        let mut heartbeat = interval(Duration::from_secs(10));
-        let mut registered = false;
-
         loop {
             tokio::select! {
                 _ = shutdown.changed() => {
@@ -106,17 +99,6 @@ impl MqttRawClient {
                         connected_tx.send(false).ok();
                         state_changed_tx.send(()).ok();
                         return Ok(());
-                    }
-                }
-
-                _ = heartbeat.tick() => {
-                    if registered {
-                        if let Ok(payload) = serde_json::to_string(&serde_json::json!({"type": "PING"})) {
-                            trace!("[raw] heartbeat ping");
-                            if let Err(e) = client.publish(&api_request_topic, QoS::AtMostOnce, false, payload).await {
-                                warn!("[raw] heartbeat publish failed: {e}");
-                            }
-                        }
                     }
                 }
 
@@ -154,39 +136,16 @@ impl MqttRawClient {
                                 if let Ok(resp) = serde_json::from_str::<RegisterResponse>(&payload) {
                                     if resp.error == "ok" {
                                         info!("raw client registered (client_id={client_id})");
-                                        registered = true;
                                         if connected_tx.send(true).is_err() {
                                             warn!("[raw] connected_tx watcher dropped on connect");
                                         }
                                         state_changed_tx.send(()).ok();
 
                                         Self::send_method(&client, &id_counter, &api_request_topic,
-                                            METHOD_GET_FULL_STATUS, Some(serde_json::json!({}))).await;
-                                        Self::send_method(&client, &id_counter, &api_request_topic,
                                             METHOD_GET_DEVICE_INFO, Some(serde_json::json!({}))).await;
-                                        Self::send_method(&client, &id_counter, &api_request_topic,
-                                            METHOD_GET_AMS_INFO, Some(serde_json::json!({}))).await;
                                     } else {
                                         error!("raw client registration failed: {}", resp.error);
                                         return Err(PrinterError::Registration(resp.error));
-                                    }
-                                }
-
-                            } else if topic == &api_status_topic {
-                                if let Ok(value) = serde_json::from_str::<Value>(&payload) {
-                                    let msg_type = value.get("type").and_then(|t| t.as_str());
-                                    if msg_type == Some("PING") || msg_type == Some("PONG") {
-                                        trace!("raw heartbeat msg: {:?}", msg_type);
-                                        continue;
-                                    }
-                                    if value.get("method").and_then(|m| m.as_u64())
-                                        == Some(METHOD_STATUS_PUSH as u64)
-                                    {
-                                        if let Some(result) = value.get("result") {
-                                            state.write().await.merge_delta(result);
-                                            state_changed_tx.send(()).ok();
-                                            trace!("[raw] status delta merged");
-                                        }
                                     }
                                 }
 
@@ -195,23 +154,11 @@ impl MqttRawClient {
                                     debug!("[raw] api_response: method={}, error_code={}",
                                         resp.method, resp.result.error_code);
 
-                                    if resp.method == METHOD_GET_FULL_STATUS && resp.result.error_code == 0 {
-                                        if let Ok(status) = serde_json::from_value::<FullStatus>(resp.result.data.clone()) {
-                                            state.write().await.seed(status);
-                                            state_changed_tx.send(()).ok();
-                                            info!("[raw] full status snapshot loaded");
-                                        }
-                                    } else if resp.method == METHOD_GET_DEVICE_INFO && resp.result.error_code == 0 {
+                                    if resp.method == METHOD_GET_DEVICE_INFO && resp.result.error_code == 0 {
                                         if let Ok(dev) = serde_json::from_value::<DeviceInfo>(resp.result.data.clone()) {
                                             let model = dev.machine_model.clone();
                                             state.write().await.device_info = Some(dev);
                                             info!("[raw] device info: model={model}");
-                                        }
-                                    } else if resp.method == METHOD_GET_AMS_INFO && resp.result.error_code == 0 {
-                                        if let Some(canvas) = resp.result.data.get("canvas_info") {
-                                            state.write().await.full.canvas_info = Some(canvas.clone());
-                                            state_changed_tx.send(()).ok();
-                                            info!("[raw] canvas info loaded");
                                         }
                                     }
                                 } else {

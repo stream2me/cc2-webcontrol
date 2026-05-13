@@ -20,7 +20,7 @@ pub struct GroupSnapshot {
     pub boxes: Vec<Detection>,
 }
 
-/// group by time+IoU; most-recent-first
+/// group by time and iou
 pub fn group_detection_points(
     points: &[DetectionPoint],
     window_secs: u64,

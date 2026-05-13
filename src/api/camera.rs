@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 
 use super::router::AppState;
 
-/// latest jpeg frame
+/// latest frame
 pub async fn snapshot(State(state): State<AppState>) -> Response<Body> {
     let frame = state.frame_buffer.read().await.clone();
     match frame {
@@ -27,7 +27,7 @@ pub async fn snapshot(State(state): State<AppState>) -> Response<Body> {
     }
 }
 
-/// mjpeg relay — one printer connection, unlimited browser clients
+/// mjpeg relay
 pub async fn stream(State(state): State<AppState>) -> Response<Body> {
     let rx = state.frame_broadcast.subscribe();
 
@@ -58,7 +58,7 @@ pub async fn stream(State(state): State<AppState>) -> Response<Body> {
         .unwrap()
 }
 
-/// camera health
+/// camera status
 pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let cs = &state.camera_status;
     axum::Json(serde_json::json!({

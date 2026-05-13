@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import { printer, detection, showToast } from '../stores';
   import type { DetectionPoint } from '../stores';
-  import { toggleDetection, getDetectionStatus, getDetectionHistory } from '../api';
+  import { toggleDetection, getDetectionStatus, getDetectionHistory, runDetection, cameraSnapshotUrl } from '../api';
+  import type { RunDetectionResult } from '../api';
+  import { requestOpenSettings } from '../stores';
   import { toErrorMessage } from './errors';
   import Modal from './Modal.svelte';
   import { fly, fade } from 'svelte/transition';
@@ -32,7 +34,6 @@
   })();
 
   $: showCleanBanner = isPrinting && history.length === 0;
-  $: showNoDataBanner = !isPrinting && history.length === 0;
   $: peak = history.length ? Math.max(...history.map(p => p.score)) : 0;
 
   $: scoreColor = score >= pauseT ? 'var(--danger)'
@@ -126,18 +127,44 @@
     try { await toggleDetection(); } catch (e) { showToast(toErrorMessage(e) || 'Failed to toggle detection', 'error'); }
   }
 
+  let detTestOpen = false;
+  let detTestRunning = false;
+  let detTestResult: RunDetectionResult | null = null;
+  let detTestError = '';
+  let detTestFrameUrl = '';
+
+  function openDetTest() {
+    detTestOpen = true;
+    detTestResult = null;
+    detTestError = '';
+    detTestRunning = false;
+    detTestFrameUrl = cameraSnapshotUrl() + '?t=' + Date.now();
+  }
+
+  async function doDetTest() {
+    detTestRunning = true;
+    detTestError = '';
+    detTestResult = null;
+    try {
+      detTestResult = await runDetection();
+    } catch (e) {
+      detTestError = toErrorMessage(e) || 'Detection failed';
+    }
+    detTestRunning = false;
+  }
+
   onMount(async () => {
     try { const s = await getDetectionStatus(); detection.set(s); } catch (e) { showToast(toErrorMessage(e) || 'Failed to load detection status', 'error'); }
     try {
-      const hist = await getDetectionHistory(undefined, 200);
+      const hist = await getDetectionHistory(undefined, 300);
       if (hist.length > 0) {
-        printer.update(s => ({
-          ...s,
-          detection_history: s.detection_history.length > 0 ? s.detection_history : hist,
-        }));
+        printer.update(s => {
+          const lastDbTs = hist.length ? hist[hist.length - 1].ts : 0;
+          const extras = (s.detection_history as import('../stores').DetectionPoint[]).filter(p => p.ts > lastDbTs);
+          return { ...s, detection_history: [...hist, ...extras] };
+        });
       }
     } catch {
-      // ws fills history
     }
   });
 </script>
@@ -181,24 +208,40 @@
               </span>
             </div>
           </div>
+          {#if isPrinting}
+            <div class="score-actions">
+              <button class="det-quick-btn" on:click={openDetTest}>
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/></svg>
+                Test Detection
+              </button>
+              <button class="det-hist-btn" on:click={() => requestOpenSettings.set('detection')}>
+                History
+              </button>
+            </div>
+          {/if}
         </div>
 
         <div class="graph-outer">
-          {#if showCleanBanner}
+          {#if !isPrinting}
+            <div class="idle-banner" in:fade={{ duration: 200 }}>
+              <span class="idle-msg">Printer not printing</span>
+              <div class="idle-actions">
+                <button class="det-quick-btn" on:click={openDetTest}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/></svg>
+                  Test Detection
+                </button>
+                <button class="det-hist-btn" on:click={() => requestOpenSettings.set('detection')}>
+                  History
+                </button>
+              </div>
+            </div>
+          {:else if showCleanBanner}
             <div class="clean-banner" in:fade={{ duration: 200 }}>
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/>
                 <path d="M4.5 8.5l2.5 2.5 4.5-5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               No Print Failure detected so far.
-            </div>
-          {:else if showNoDataBanner}
-            <div class="clean-banner muted" in:fade={{ duration: 200 }}>
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/>
-                <path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-              No detection data yet.
             </div>
           {:else}
             <div class="graph-wrap" bind:clientWidth={gWidth}>
@@ -282,7 +325,13 @@
 
       </div>
     {:else}
-      <div class="disabled-msg">Detection paused</div>
+      <div class="disabled-msg">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/>
+          <path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Detection off
+      </div>
     {/if}
   {/if}
 </div>
@@ -374,6 +423,57 @@
           </span>
         </div>
       {/if}
+    </div>
+  </Modal>
+{/if}
+
+{#if detTestOpen}
+  <Modal open={detTestOpen} onClose={() => (detTestOpen = false)} zIndex={110}>
+    <div class="modal-sheet det-sheet" role="dialog" aria-modal="true" in:fly={{ y: 10, duration: 200, easing: cubicOut }}>
+      <div class="modal-head">
+        <span class="modal-title">Test Detection</span>
+        <button class="modal-close" on:click={() => (detTestOpen = false)} aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 3l8 8M11 3L3 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="det-body">
+        <div class="det-frame-wrap">
+          <img src={detTestFrameUrl} alt="Camera frame" class="det-frame" />
+          {#if detTestResult}
+            <svg class="det-overlay" viewBox="0 0 1 1" preserveAspectRatio="none">
+              {#each detTestResult.detections as d}
+                <rect x={d.x1} y={d.y1} width={d.x2 - d.x1} height={d.y2 - d.y1}
+                  fill="none" stroke="var(--danger)" stroke-width="0.003"/>
+                <rect x={d.x1} y={Math.max(0, d.y1 - 0.035)} width="0.08" height="0.03"
+                  fill="var(--danger)" rx="0.004"/>
+                <text x={d.x1 + 0.005} y={Math.max(0.02, d.y1 - 0.012)}
+                  fill="#fff" font-size="0.022" font-weight="600">{(d.confidence * 100).toFixed(0)}%</text>
+              {/each}
+            </svg>
+          {/if}
+        </div>
+        <div class="det-controls">
+          {#if detTestResult}
+            <div class="det-score" class:high={detTestResult.score >= 0.5} class:low={detTestResult.score < 0.5 && detTestResult.score > 0}>
+              Score: <span class="mono">{(detTestResult.score * 100).toFixed(1)}%</span>
+              - {detTestResult.detections.length} detection{detTestResult.detections.length !== 1 ? 's' : ''}
+            </div>
+          {/if}
+          {#if detTestError}
+            <div class="det-err">{detTestError}</div>
+          {/if}
+          <div class="det-actions">
+            <button class="btn" on:click={() => { detTestFrameUrl = cameraSnapshotUrl() + '?t=' + Date.now(); detTestResult = null; }}>
+              Refresh frame
+            </button>
+            <button class="btn primary" on:click={doDetTest} disabled={detTestRunning}>
+              {#if detTestRunning}<span class="spinner-xs"></span> Running…{:else}Run detection{/if}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </Modal>
 {/if}
@@ -504,6 +604,73 @@
     overflow: hidden;
   }
 
+  .idle-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 14px;
+    gap: 10px;
+  }
+  .idle-msg {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .idle-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .det-hist-btn {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  .det-hist-btn:hover {
+    background: var(--surface2);
+    color: var(--muted);
+    border-color: var(--border2);
+  }
+  .det-quick-btn {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+    min-width: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  .det-quick-btn:hover:not(:disabled) {
+    background: var(--surface3);
+    color: var(--text);
+    border-color: var(--border2);
+  }
+  .det-quick-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+  .spinner-xs {
+    width: 10px; height: 10px;
+    border: 1.5px solid var(--border2);
+    border-top-color: var(--muted);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   .clean-banner {
     display: flex;
     align-items: center;
@@ -514,8 +681,6 @@
     font-weight: 500;
     color: var(--success);
   }
-  .clean-banner.muted { color: var(--muted); }
-
   .graph-wrap { position: relative; }
   .graph-svg { display: block; }
 
@@ -534,11 +699,22 @@
   .gf-peak { font-weight: 600; font-family: var(--font-mono); }
 
   .disabled-msg {
-    padding: 20px 14px;
-    font-size: 13px;
-    color: var(--muted);
-    text-align: center;
-    font-style: italic;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 18px 14px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--danger);
+  }
+
+  .score-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-shrink: 0;
   }
 
   /* tooltip */
@@ -660,4 +836,56 @@
     border-top: 1px solid var(--border);
     background: var(--surface2);
   }
+
+  /* test modal reuses sheet chrome from settings dialogs */
+  .modal-sheet {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    box-shadow: 0 24px 80px -20px rgba(0,0,0,0.65), 0 4px 14px rgba(0,0,0,0.3);
+    overflow: hidden;
+  }
+  .det-sheet { width: min(640px, calc(100vw - 40px)); }
+  .modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .modal-close {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .modal-close:hover { background: var(--border); }
+  .det-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .det-frame-wrap {
+    position: relative;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+  }
+  .det-frame { display: block; width: 100%; height: auto; min-height: 200px; object-fit: contain; background: #000; }
+  .det-controls { display: flex; flex-direction: column; gap: 10px; }
+  .det-score {
+    font-size: 13px; font-weight: 500; color: var(--muted);
+    padding: 8px 12px; background: var(--surface2);
+    border-radius: var(--radius); border: 1px solid var(--border);
+  }
+  .det-score.high { color: var(--danger); border-color: rgba(192,57,74,0.35); background: var(--danger-dim); }
+  .det-score.low { color: var(--warning); border-color: rgba(192,120,40,0.35); background: var(--warning-dim); }
+  .det-err {
+    font-size: 12px; color: var(--danger);
+    padding: 8px 12px; background: var(--danger-dim);
+    border-radius: var(--radius);
+  }
+  .det-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .mono { font-family: var(--font-mono); }
 </style>

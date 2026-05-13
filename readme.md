@@ -7,21 +7,18 @@ Linux: one container runs both the Rust app (frontend included) and Obico ML.
 ## Current Issues
 This project just started and it already took quite a lot of my time so its not 100% finished..
 - No Windows support (comming soon! I just need to get a windows pc to try)
-- Upload not working
-- Axis Control need to be made
-- Canvas filament management need to be made
-- Start print not fully working
-- UI is not really responsive (will be fixed dw)
-- UI looks ai cause i kinda suck at styling but ill try to remake it all myself ^^
+- Canvas filament edit (soon)
+- UI is not really responsive (for mobiles)
 
 ## Features
 - Automatic printer recognition
 - Full Web UI
 - Customisable AI print failures detection with Obico ML
 - Notifications support (NTFY and Discord webhook)
+- All features from ElegooSlicer UI
 
 ## Run (Docker Compose)
-
+> runs both the webui and Obico ML
 ```bash
 docker compose up -d --build
 ```
