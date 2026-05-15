@@ -30,9 +30,9 @@
       </button>
       {#if checkState === 'done'}
         {#if checkResult && !checkResult.up_to_date}
-          <a class="check-link" href="https://github.com/DimeusDev/cc2-openwebui/releases" target="_blank" rel="noopener">Update available →</a>
+          <a class="check-link" href="https://github.com/DimeusDev/cc2-openwebui/releases" target="_blank" rel="noopener">v{checkResult.latest_version} available →</a>
         {:else if checkResult}
-          <span class="check-ok">Up to date</span>
+          <span class="check-ok">Up to date (v{checkResult.current_version})</span>
         {:else}
           <span class="check-err">Check failed</span>
         {/if}

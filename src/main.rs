@@ -179,7 +179,7 @@ async fn main() {
 
     let update_checker = update::UpdateChecker::new();
     update_checker.clone().start();
-    info!("update checker started (current sha={})", env!("GIT_HASH"));
+    info!("update checker started (version={})", env!("CARGO_PKG_VERSION"));
 
     let router = api::router::build_router(
         manager_arc,

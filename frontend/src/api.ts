@@ -580,8 +580,8 @@ export function snapshotUrl(filename: string): string {
 }
 
 export interface VersionInfo {
-  current_sha: string;
-  latest_sha: string | null;
+  current_version: string;
+  latest_version: string | null;
   up_to_date: boolean;
 }
 

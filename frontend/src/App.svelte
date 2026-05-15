@@ -24,6 +24,7 @@
   let updateAvailable = false;
   let updateDismissed = false;
   let updateChecked = false;
+  let latestVersion: string | null = null;
 
   const UPDATE_DISMISS_KEY = 'cc2_update_dismissed';
 
@@ -42,7 +43,10 @@
     updateChecked = true;
     try {
       const v = await getVersion();
-      if (!v.up_to_date && !isDismissedToday()) updateAvailable = true;
+      if (!v.up_to_date && !isDismissedToday()) {
+        latestVersion = v.latest_version;
+        updateAvailable = true;
+      }
     } catch { /* network error, skip silently */ }
   }
 
@@ -168,7 +172,7 @@
         <path d="M7 12V3M3 6.5l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </span>
-    <span class="update-text">A new version is available</span>
+    <span class="update-text">{latestVersion ? `v${latestVersion} is available` : 'A new version is available'}</span>
     <a
       class="update-link"
       href="https://github.com/DimeusDev/cc2-openwebui"
