@@ -33,7 +33,7 @@ impl UpdateChecker {
         })
     }
 
-    async fn check(&self) {
+    pub async fn check(&self) {
         let url = format!("https://api.github.com/repos/{REPO}/commits/main");
         let result = self
             .client

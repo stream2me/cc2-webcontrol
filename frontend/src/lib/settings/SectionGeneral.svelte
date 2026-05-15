@@ -1,6 +1,45 @@
 <script lang="ts">
+  import { checkForUpdates, type VersionInfo } from '../../api';
+
   export let printer: { ip: string; printer_id: string; pincode: string };
+
+  let checkState: 'idle' | 'checking' | 'done' = 'idle';
+  let checkResult: VersionInfo | null = null;
+
+  async function doCheckUpdate() {
+    checkState = 'checking';
+    checkResult = null;
+    try {
+      checkResult = await checkForUpdates();
+    } catch {
+      checkResult = null;
+    }
+    checkState = 'done';
+  }
 </script>
+
+<div class="group">
+  <div class="row">
+    <div class="row-label">
+      <div class="row-title">Updates</div>
+      <div class="row-sub">Check if a newer version is available on GitHub.</div>
+    </div>
+    <div class="update-area">
+      <button class="btn sm" on:click={doCheckUpdate} disabled={checkState === 'checking'}>
+        {checkState === 'checking' ? 'Checking…' : 'Check for updates'}
+      </button>
+      {#if checkState === 'done'}
+        {#if checkResult && !checkResult.up_to_date}
+          <a class="check-link" href="https://github.com/DimeusDev/cc2-openwebui/releases" target="_blank" rel="noopener">Update available →</a>
+        {:else if checkResult}
+          <span class="check-ok">Up to date</span>
+        {:else}
+          <span class="check-err">Check failed</span>
+        {/if}
+      {/if}
+    </div>
+  </div>
+</div>
 
 <div class="group">
   <div class="row">
@@ -42,6 +81,12 @@
   .row-input { width: 100%; }
   .row-input.short { max-width: 140px; justify-self: end; }
   .pin-disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .update-area { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .check-ok { font-size: 11.5px; color: var(--success, #4caf50); }
+  .check-err { font-size: 11.5px; color: var(--danger); }
+  .check-link { font-size: 11.5px; color: var(--accent); text-decoration: none; }
+  .check-link:hover { text-decoration: underline; }
 
   @media (max-width: 700px) {
     .row { grid-template-columns: 1fr; gap: 8px; }

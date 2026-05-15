@@ -25,6 +25,7 @@
     resetError = '';
     try {
       await resetAll();
+      localStorage.clear();
       window.location.reload();
     } catch (e) {
       resetState = 'error';
@@ -48,10 +49,10 @@
     </div>
   </div>
   <ul class="danger-list">
-    <li>Printer IP and pincode are wiped.</li>
-    <li>Detection threshold and Obico URL revert to defaults.</li>
-    <li>ntfy credentials are cleared.</li>
-    <li>Active MQTT connection is closed.</li>
+    <li>Printer IP, pincode and all config wiped.</li>
+    <li>All detection history, events and snapshots deleted.</li>
+    <li>Notification destinations cleared.</li>
+    <li>Active MQTT connection closed.</li>
   </ul>
   {#if !resetConfirmOpen}
     <button class="btn danger" on:click={openResetConfirm}>

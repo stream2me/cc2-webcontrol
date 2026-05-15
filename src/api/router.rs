@@ -136,6 +136,7 @@ pub fn build_router(
             get(snapshots::list_snapshots).delete(snapshots::delete_all_snapshots))
         .route("/api/snapshots/:filename", axum::routing::delete(snapshots::delete_snapshot))
         .route("/api/version", get(version::get_version))
+        .route("/api/version/check", post(version::check_now))
         .route("/ws", get(ws::ws_handler))
         .with_state(app_state);
 

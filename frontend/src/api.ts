@@ -590,3 +590,9 @@ export async function getVersion(): Promise<VersionInfo> {
   if (!res.ok) await apiError(res, 'getVersion');
   return res.json();
 }
+
+export async function checkForUpdates(): Promise<VersionInfo> {
+  const res = await fetch(`${BASE}/api/version/check`, { method: 'POST' });
+  if (!res.ok) await apiError(res, 'checkForUpdates');
+  return res.json();
+}

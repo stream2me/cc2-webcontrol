@@ -147,6 +147,21 @@ pub async fn reset_setup(State(state): State<AppState>) -> Result<Json<Value>, A
 
     crate::db::reset_config(&state.db).await
         .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
+    crate::db::clear_detection_points(&state.db).await;
+    crate::db::clear_events(&state.db).await;
+
+    if let Ok(entries) = std::fs::read_dir("snapshots") {
+        for entry in entries.flatten() {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+
+    {
+        let mut s = state.printer_state.write().await;
+        s.detection_history.clear();
+        s.events.clear();
+        s.events_total = 0;
+    }
 
     let _ = state.det_enabled_tx.send(defaults.detection.enabled);
     let _ = state.det_config_tx.send(defaults.detection.clone());
