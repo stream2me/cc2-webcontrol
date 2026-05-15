@@ -16,6 +16,7 @@ This project just started and it already took quite a lot of my time so its not 
 - Customisable AI print failures detection with Obico ML
 - Notifications support (NTFY and Discord webhook)
 - All features from ElegooSlicer UI
+- Update checking
 
 ## Run (Docker Compose)
 > runs both the webui and Obico ML
