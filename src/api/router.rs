@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
@@ -140,7 +142,7 @@ pub fn build_router(
         .route("/ws", get(ws::ws_handler))
         .with_state(app_state);
 
-    let frontend_dir = find_frontend_dir().join("frontend/dist");
+    let frontend_dir = webif_dir();
 
     tracing::info!("serving frontend from: {:?}", frontend_dir);
 
@@ -174,7 +176,7 @@ async fn health() -> axum::Json<serde_json::Value> {
 }
 
 async fn serve_index() -> axum::response::Html<String> {
-    let index_path = find_frontend_dir().join("frontend/dist/index.html");
+    let index_path = webif_dir().join("index.html");
     match std::fs::read_to_string(&index_path) {
         Ok(html) => axum::response::Html(html),
         Err(e) => {
@@ -182,4 +184,31 @@ async fn serve_index() -> axum::response::Html<String> {
             axum::response::Html("<h1>Frontend not built. Run: cd frontend && npm run build</h1>".to_string())
         }
     }
+}
+
+static WEBIF_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn webif_dir() -> PathBuf {
+    WEBIF_DIR
+        .get_or_init(|| {
+            // 1) CLI: --webif-dir /pfad/zum/dist
+            let mut args = std::env::args().skip(1);
+
+            while let Some(arg) = args.next() {
+                if arg == "--webif-dir" {
+                    if let Some(path) = args.next() {
+                        return PathBuf::from(path);
+                    }
+                }
+
+                // 2) CLI: --webif-dir=/pfad/zum/dist
+                if let Some(path) = arg.strip_prefix("--webif-dir=") {
+                    return PathBuf::from(path);
+                }
+            }
+
+            // 3) Default/Fallback
+            find_frontend_dir().join("frontend/dist")
+        })
+        .clone()
 }
