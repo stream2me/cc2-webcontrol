@@ -1,47 +1,33 @@
-# cc2-openwebui
+# cc2-webcontrol
 
-Simple LAN web UI for Elegoo CC2.
+cc2-webcontrol is a standalone Web UI for the Centauri Carbon 2, designed to run directly on the device without requiring a Docker container.
 
-Linux: one container runs both the Rust app (frontend included) and Obico ML.
+The project is based on [cc2-openwebui](https://github.com/DimeusDev/cc2-openwebui), but takes a different approach by focusing on an onboard web interface that runs directly on the CC2.
 
-## Current Issues
-This project just started and it already took quite a lot of my time so its not 100% finished..
-### Start print feature unstable, watch your first layer when using it.
-- Canvas filament edit (soon)
-- Printer connection when PIN enabled (soon) 
-- UI is not really responsive (for mobiles)
+AI detection features from the original project are currently out of scope for this standalone/on-device approach. They may still be possible separately through Docker-based components or future adaptations.
 
-## Features
-- Automatic printer recognition
-- Full Web UI
-- Customisable AI print failures detection with Obico ML
-- Notifications support (NTFY and Discord webhook)
-- All features from ElegooSlicer UI
-- Update checking
+## Goals
 
-## Run (Docker Compose)
-> runs both the webui and Obico ML
-### Windows (Docker Desktop)
-```bash
-docker compose -f docker-compose.windows.yml up --build
-```
+- Run directly on the Centauri Carbon 2
+- Provide an onboard web interface
+- Avoid the need for a Docker container for the core Web UI
+- Focus on monitoring and controlling the CC2
+- Keep the setup lightweight and device-oriented
 
-### Others
-```bash
-docker compose up -d --build
-```
+## Current Status
 
-Then open `http://127.0.0.1:8484` and do setup from onboarding.
-No manual config copy is needed.
+This project is currently experimental and under active development.
 
-## Tips
-- Use tailscale/others to use the webui from everywhere outside your network.
+## Based on
 
-## Notes
+This project is based on [cc2-openwebui](https://github.com/DimeusDev/cc2-openwebui) by DimeusDev.
 
-- Data, snapshots, and config are kept in `/work` (mounted volume above)
-- Obico ML runs inside the same container on port `3333`
+The original project provides a LAN Web UI for the Centauri Carbon 2 and includes Docker-based deployment and AI print failure detection via Obico ML.
 
-### Contact:
-_dimeus on discord
-pro@dimeus.dev
+cc2-webcontrol focuses on running the core Web UI directly on the printer without Docker. AI detection is currently not part of this approach, but may be added later through separate Docker-based components or adapted integration.
+
+## License
+
+The original repository currently does not include an explicit license.
+
+Until the licensing situation is clarified, this project should be considered experimental/private and not a clearly licensed open-source redistribution.
