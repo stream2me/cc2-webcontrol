@@ -3,7 +3,7 @@
 /frontend/dist/
 /frontend/build/
 /frontend/.svelte-kit/
-frontend/package-lock.json
+/frontend/package-lock.json
 
 /snapshots/
 /tmp/
