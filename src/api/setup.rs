@@ -121,6 +121,9 @@ pub async fn complete_onboarding(
     let port = config.server.port;
     let log_level = config.logging.level.clone();
     drop(config);
+    // update settings in frontend
+    let _ = state.det_config_tx.send(detection_cfg.clone());  
+    let _ = state.det_enabled_tx.send(detection_cfg.enabled);
 
     crate::db::save_detection_config(&state.db, &detection_cfg).await
         .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
@@ -363,6 +366,7 @@ pub async fn save_config(
         config.printer.pincode = pincode;
         let printer_cfg = config.printer.clone();
         drop(config);
+
         crate::db::save_printer_config(&state.db, &printer_cfg).await
             .map_err(|e| AppError::Config(crate::error::ConfigError::Db(e)))?;
         info!("printer config saved to db");
