@@ -4,10 +4,11 @@
   import { toErrorMessage } from '../errors';
 
   const dispatch = createEventDispatcher<{
-    next: { obicoUrl: string; notifyThreshold: number; pauseThreshold: number };
+    next: { detectionEnabled: boolean; obicoUrl: string; notifyThreshold: number; pauseThreshold: number };
     back: void;
   }>();
 
+  let detectionEnabled = true;
   let notifyThreshold = 0.6;
   let pauseThreshold = 0.7;
   let obicoUrl = 'http://localhost:3333/p/';
@@ -15,7 +16,6 @@
 
   let testUrlState: 'idle' | 'testing' | 'ok' | 'fail' = 'idle';
   let testUrlError = '';
-
 
   async function doTestObicoUrl() {
     testUrlState = 'testing';
@@ -31,59 +31,74 @@
 </script>
 
 <section class="card">
-  <div class="card-head">
-    <span class="eyebrow">Step 2 · Detection</span>
-    <h2>AI failure detection</h2>
-    <p>Set your Obico ML URL and test it before continuing.</p>
+  <div class="card-head detection-head">
+    <div>
+      <span class="eyebrow">Step 2    Detection</span>
+      <h2>AI failure detection</h2>
+      <p>
+        {#if detectionEnabled}
+          Set your Obico ML URL and test it before continuing.
+        {:else}
+          AI failure detection is disabled. You can continue without Obico ML.
+        {/if}
+      </p>
+    </div>
+
+    <label class="detection-switch">
+      <span>{detectionEnabled ? 'Enabled' : 'Disabled'}</span>
+      <input type="checkbox" bind:checked={detectionEnabled} />
+    </label>
   </div>
 
-  <div class="req-box">
-    <div class="req-title">Obico ML connection</div>
-    <p class="req-sub">This checks if the URL is reachable from the app.</p>
+  {#if detectionEnabled}
+    <div class="req-box">
+      <div class="req-title">Obico ML connection</div>
+      <p class="req-sub">This checks if the URL is reachable from the app.</p>
 
-    <div class="obico-overlay">
-      <div class="field-wrap">
-        <label class="field-label" for="obico-url">Obico ML URL</label>
-        <input id="obico-url" class="input mono" type="text" bind:value={obicoUrl} />
-      </div>
-
-      <button class="btn primary big-test" on:click={doTestObicoUrl} disabled={!obicoUrl || testUrlState === 'testing'}>
-        {testUrlState === 'testing' ? 'Testing…' : 'Test Obico ML connection'}
-      </button>
-
-      {#if testUrlState === 'ok'}
-        <div class="alert ok">Obico ML is reachable.</div>
-      {/if}
-
-      {#if testUrlState === 'fail'}
-        <div class="alert err">
-          <div>{testUrlError || 'Connection failed.'}</div>
-          <a class="guide-link" href={obicoGuideUrl} target="_blank" rel="noreferrer">Open Obico guide</a>
+      <div class="obico-overlay">
+        <div class="field-wrap">
+          <label class="field-label" for="obico-url">Obico ML URL</label>
+          <input id="obico-url" class="input mono" type="text" bind:value={obicoUrl} />
         </div>
-      {/if}
-    </div>
-  </div>
 
-  <div class="options">
-    <div class="opt-row col">
-      <div class="opt-main">
-        <div class="opt-title">Notify threshold <span class="opt-val mono">{notifyThreshold.toFixed(2)}</span></div>
-        <div class="opt-sub">Score above which a notification is sent. Lower = more sensitive.</div>
+        <button class="btn primary big-test" on:click={doTestObicoUrl} disabled={!obicoUrl || testUrlState === 'testing'}>
+          {testUrlState === 'testing' ? 'Testing…' : 'Test Obico ML connection'}
+        </button>
+
+        {#if testUrlState === 'ok'}
+          <div class="alert ok">Obico ML is reachable.</div>
+        {/if}
+
+        {#if testUrlState === 'fail'}
+          <div class="alert err">
+            <div>{testUrlError || 'Connection failed.'}</div>
+            <a class="guide-link" href={obicoGuideUrl} target="_blank" rel="noreferrer">Open Obico guide</a>
+          </div>
+        {/if}
       </div>
-      <input type="range" min="0.2" max="0.9" step="0.05" bind:value={notifyThreshold} class="range" />
     </div>
-    <div class="opt-row col">
-      <div class="opt-main">
-        <div class="opt-title">Pause threshold <span class="opt-val mono">{pauseThreshold.toFixed(2)}</span></div>
-        <div class="opt-sub">Score above which print is auto-paused. Should be higher than notify.</div>
+
+    <div class="options">
+      <div class="opt-row col">
+        <div class="opt-main">
+          <div class="opt-title">Notify threshold <span class="opt-val mono">{notifyThreshold.toFixed(2)}</span></div>
+          <div class="opt-sub">Score above which a notification is sent. Lower = more sensitive.</div>
+        </div>
+        <input type="range" min="0.2" max="0.9" step="0.05" bind:value={notifyThreshold} class="range" />
       </div>
-      <input type="range" min="0.2" max="0.9" step="0.05" bind:value={pauseThreshold} class="range" />
+      <div class="opt-row col">
+        <div class="opt-main">
+          <div class="opt-title">Pause threshold <span class="opt-val mono">{pauseThreshold.toFixed(2)}</span></div>
+          <div class="opt-sub">Score above which print is auto-paused. Should be higher than notify.</div>
+        </div>
+        <input type="range" min="0.2" max="0.9" step="0.05" bind:value={pauseThreshold} class="range" />
+      </div>
     </div>
-  </div>
+  {/if}
 
   <div class="actions">
     <button class="btn ghost" on:click={() => dispatch('back')}>← Back</button>
-    <button class="btn primary" on:click={() => dispatch('next', { obicoUrl, notifyThreshold, pauseThreshold })}>Continue</button>
+    <button class="btn primary" on:click={() => dispatch('next', { detectionEnabled, obicoUrl, notifyThreshold, pauseThreshold })}>Continue</button>
   </div>
 </section>
 
@@ -118,4 +133,53 @@
   .guide-link { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--accent); text-decoration: underline; }
 
   .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; gap: 10px; }
+
+  .detection-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .detection-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: #d4d4d8;
+    font-size: 0.9rem;
+    user-select: none;
+    cursor: pointer;
+  }
+
+  .detection-switch input {
+    width: 42px;
+    height: 22px;
+    appearance: none;
+    background: #3f3f46;
+    border-radius: 999px;
+    position: relative;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.2s ease;
+  }
+
+  .detection-switch input::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 2px;
+    top: 2px;
+    border-radius: 50%;
+    background: #ffffff;
+    transition: transform 0.2s ease;
+  }
+
+  .detection-switch input:checked {
+    background: #2f8df5;
+  }
+
+  .detection-switch input:checked::before {
+    transform: translateX(20px);
+  }
 </style>

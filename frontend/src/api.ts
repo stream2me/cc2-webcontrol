@@ -112,6 +112,7 @@ export function defaultToggles(): EventToggles {
 
 export interface OnboardingPayload {
   detection?: {
+    enabled?: boolean;
     obico_url?: string;
     notify_threshold?: number;
     pause_threshold?: number;

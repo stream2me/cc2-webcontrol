@@ -10,13 +10,13 @@
   const dispatch = createEventDispatcher<{ complete: void }>();
 
   let phase: 1 | 2 | 3 | 7 = 1;
-  let detectSettings = { obicoUrl: 'http://localhost:3333/p/', notifyThreshold: 0.6, pauseThreshold: 0.7 };
+  let detectSettings = { detectionEnabled: false, obicoUrl: 'http://localhost:3333/p/', notifyThreshold: 0.6, pauseThreshold: 0.7 };
 
   function onPhase1Complete() {
     phase = 2;
   }
 
-  function onPhase2Next(e: CustomEvent<{ obicoUrl: string; notifyThreshold: number; pauseThreshold: number }>) {
+  function onPhase2Next(e: CustomEvent<{ detectionEnabled: boolean; obicoUrl: string; notifyThreshold: number; pauseThreshold: number }>) {
     detectSettings = e.detail;
     phase = 3;
   }
@@ -92,6 +92,7 @@
           <PhaseTwoDetection on:next={onPhase2Next} on:back={onPhase2Back} />
         {:else if phase === 3}
           <PhaseThreeNotifications
+            detectionEnabled={detectSettings.detectionEnabled}
             obicoUrl={detectSettings.obicoUrl}
             notifyThreshold={detectSettings.notifyThreshold}
             pauseThreshold={detectSettings.pauseThreshold}

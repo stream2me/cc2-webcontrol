@@ -71,6 +71,7 @@ pub struct CompleteOnboardingRequest {
 
 #[derive(Deserialize)]
 pub struct OnboardingDetection {
+    pub enabled: Option<bool>,
     pub obico_url: Option<String>,
     pub notify_threshold: Option<f64>,
     pub pause_threshold: Option<f64>,
@@ -88,6 +89,9 @@ pub async fn complete_onboarding(
     let mut config = state.config.write().await;
 
     if let Some(d) = req.detection {
+        if let Some(v) = d.enabled {
+            config.detection.enabled = v;
+        }
         if let Some(url) = d.obico_url {
             config.detection.obico_url = url;
         }

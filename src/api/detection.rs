@@ -54,6 +54,7 @@ pub async fn toggle(
 
 #[derive(Deserialize)]
 pub struct DetectionConfigRequest {
+    pub enabled: Option<bool>,
     pub notify_threshold: Option<f64>,
     pub pause_threshold: Option<f64>,
     pub interval_secs: Option<u32>,
@@ -66,6 +67,7 @@ pub async fn update_config(
 ) -> Result<Json<Value>, AppError> {
     let det_to_save = {
         let mut cfg = state.config.write().await;
+        if let Some(v) = req.enabled { cfg.detection.enabled = v; }
         if let Some(v) = req.notify_threshold { cfg.detection.notify_threshold = v.clamp(0.0, 1.0); }
         if let Some(v) = req.pause_threshold { cfg.detection.pause_threshold = v.clamp(0.0, 1.0); }
         if let Some(v) = req.interval_secs { cfg.detection.interval_secs = v.max(5); }

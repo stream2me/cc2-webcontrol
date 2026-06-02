@@ -8,6 +8,7 @@
   import appleStoreIcon from '../icons/apple-store.svg';
   import androidStoreIcon from '../icons/android-store.svg';
 
+  export let detectionEnabled: boolean;
   export let obicoUrl: string;
   export let notifyThreshold: number;
   export let pauseThreshold: number;
@@ -74,7 +75,7 @@
         }
       }
       await completeOnboarding({
-        detection: { obico_url: obicoUrl, notify_threshold: notifyThreshold, pause_threshold: pauseThreshold },
+        detection: { enabled: detectionEnabled, obico_url: obicoUrl, notify_threshold: notifyThreshold, pause_threshold: pauseThreshold },
         notifications: dests.length > 0 ? { destinations: dests } : undefined,
       });
       dispatch('complete');
