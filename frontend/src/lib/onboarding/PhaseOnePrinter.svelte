@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import cc2Image from '../cc2.png';
-  import { scanNetwork, verifyPrinter, saveConfig } from '../../api';
+  import { scanNetwork, verifyPrinter, saveConfig, getHostOs } from '../../api';
   import { toErrorMessage } from '../errors';
 
-  const dispatch = createEventDispatcher<{ complete: void }>();
+  const dispatch = createEventDispatcher<{
+    complete: { local_mode: boolean };
+  }>();
 
   type Substep = 'intro' | 'scan' | 'configure' | 'verify';
-  let substep: Substep = 'intro';
+  let substep: Substep = '';
   let error = '';
 
   let scanning = false;
@@ -20,6 +22,23 @@
   let verifying = false;
   let verifyProgress = '';
   let savingPrinter = false;
+  let local_mode = false;
+
+  onMount(async () => {
+    try {
+      const info = await getHostOs();
+      if (info.local_mode) {
+        local_mode = true;
+        selectedIp = '';
+        manualIp = 'localhost';
+        await doVerify();
+      } else {
+        substep = 'intro';
+      }
+    } catch (e) {
+      console.warn('Failed to get host OS info:', e);
+    }
+  });
 
   async function doScan() {
     scanning = true;
@@ -63,7 +82,7 @@
       savingPrinter = true;
       await saveConfig(ip, result.printer_id, '');
       savingPrinter = false;
-      dispatch('complete');
+      dispatch('complete', { local_mode });
     } catch (e) {
       const msg = toErrorMessage(e).toLowerCase();
       if (msg.includes('timeout') || msg.includes('no response')) {

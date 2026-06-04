@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::process::Command;
+use std::path::Path;
 
 use axum::extract::State;
 use axum::Json;
@@ -38,17 +39,20 @@ pub struct HostOsResponse {
     pub arch: &'static str,
     pub docker_command: String,
     pub gpu_supported: bool,
+    pub local_mode: bool,
 }
 
 pub async fn host_os() -> Json<HostOsResponse> {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let docker_command = build_docker_command(os);
+    let local_mode = Path::new("/opt/bin/elegoo_printer").is_file();
     Json(HostOsResponse {
         os,
         arch,
         docker_command,
         gpu_supported: false,
+        local_mode,
     })
 }
 

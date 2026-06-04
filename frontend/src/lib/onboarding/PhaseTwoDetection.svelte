@@ -8,7 +8,9 @@
     back: void;
   }>();
 
-  let detectionEnabled = true;
+  export let local_mode = false;
+
+  let detectionEnabled = !local_mode;
   let notifyThreshold = 0.6;
   let pauseThreshold = 0.7;
   let obicoUrl = 'http://localhost:3333/p/';

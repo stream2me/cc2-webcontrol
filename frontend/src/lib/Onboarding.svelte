@@ -11,8 +11,10 @@
 
   let phase: 1 | 2 | 3 | 7 = 1;
   let detectSettings = { detectionEnabled: false, obicoUrl: 'http://localhost:3333/p/', notifyThreshold: 0.6, pauseThreshold: 0.7 };
+  let local_mode = false;
 
-  function onPhase1Complete() {
+  function onPhase1Complete(e: CustomEvent<{ local_mode: boolean }>) {
+    local_mode = e.detail.local_mode;
     phase = 2;
   }
 
@@ -89,7 +91,7 @@
         {#if phase === 1}
           <PhaseOnePrinter on:complete={onPhase1Complete} />
         {:else if phase === 2}
-          <PhaseTwoDetection on:next={onPhase2Next} on:back={onPhase2Back} />
+          <PhaseTwoDetection {local_mode} on:next={onPhase2Next} on:back={onPhase2Back} />
         {:else if phase === 3}
           <PhaseThreeNotifications
             detectionEnabled={detectSettings.detectionEnabled}
