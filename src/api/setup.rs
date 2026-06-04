@@ -316,7 +316,7 @@ pub async fn verify_printer(
         _ => "123456".to_string(),
     };
 
-    let printer_id = crate::printer::discovery::discover_printer_id(&req.ip, "elegoo", &password, 5)
+    let printer_id = crate::printer::discovery::discover_printer_id(&req.ip, "elegoo", &password, 10)
         .await
         .map_err(|e| {
             if matches!(e, crate::error::PrinterError::DiscoveryTimeout(_)) {
