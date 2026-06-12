@@ -45,3 +45,6 @@ No manual config copy is needed.
 ### Contact:
 _dimeus on discord
 pro@dimeus.dev
+
+### LICENSE
+Mit license, feel free to contribute
