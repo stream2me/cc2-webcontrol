@@ -22,3 +22,6 @@
 
 /toolchain/
 /scripts/build-webif.sh
+
+/Cargo.lock
+/Cargo.toml
