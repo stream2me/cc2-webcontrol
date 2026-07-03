@@ -34,7 +34,18 @@
   $: streamUrl = connected ? '/api/camera/stream' : '';
   $: if (connected) imgError = false;
 
-  let pollTimer: number;
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+  $: if ($detection.enabled) {
+    if (!pollTimer) {
+      pollTimer = window.setInterval(pollDetection, 2000);
+    }
+  } else {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = undefined;
+    }
+  }
 
   async function pollDetection() {
     try {
@@ -59,11 +70,11 @@
   }
 
   onMount(() => {
-    pollTimer = window.setInterval(pollDetection, 2000);
     document.addEventListener('fullscreenchange', onFullscreenChange);
   });
+
   onDestroy(() => {
-    clearInterval(pollTimer);
+    if (pollTimer) clearInterval(pollTimer);
     if (reconnectTimer !== null) clearTimeout(reconnectTimer);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
   });
