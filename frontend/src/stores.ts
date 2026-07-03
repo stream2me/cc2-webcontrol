@@ -220,5 +220,6 @@ export const ui_settings = writable([
   { id: 'files',       label: 'Show FileList',       checked: true, value: false ? 'on' : 'off' },
   { id: 'camera',      label: 'Show Camera',         checked: true, value: false ? 'on' : 'off' },
   { id: 'temperature', label: 'Show TempPanel',      checked: true, value: false ? 'on' : 'off' },
-  { id: 'canvas',      label: 'Show CanvasPanel',    checked: true, value: false ? 'on' : 'off' }
+  { id: 'canvas',      label: 'Show CanvasPanel',    checked: true, value: false ? 'on' : 'off' },
+  { id: 'bedmesh',     label: 'Show Bed Mesh',       checked: true, value: false ? 'on' : 'off' },
 ]);

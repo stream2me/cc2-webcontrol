@@ -597,3 +597,14 @@ export async function checkForUpdates(): Promise<VersionInfo> {
   if (!res.ok) await apiError(res, 'checkForUpdates');
   return res.json();
 }
+
+export async function getAutosaveCfg(): Promise<string> {
+  const response = await fetch('/api/printer/bedmesh', {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server response Status ${response.status}`);
+  }
+  return await response.text();
+}

@@ -20,6 +20,7 @@ use super::snapshots;
 use super::upload;
 use super::version;
 use super::ws;
+use super::bedmesh;
 use crate::camera::{CameraStatus, FrameBuffer, FrameBroadcast};
 use crate::config::AppConfig;
 use crate::printer::manager::PrinterManager;
@@ -103,6 +104,7 @@ pub fn build_router(
         .route("/api/printer/canvas/auto-refill", post(printer::set_canvas_auto_refill))
         .route("/api/printer/thumbnail", get(printer::get_thumbnail))
         .route("/api/printer/file-detail", get(printer::get_file_detail))
+        .route("/api/printer/bedmesh", get(bedmesh::get_autosave_cfg))
         .route(
             "/api/printer/upload",
             post(upload::upload_file).route_layer(DefaultBodyLimit::max(600 * 1024 * 1024)),
@@ -149,6 +151,7 @@ pub fn build_router(
     let frontend = Router::new()
         .fallback_service(
             ServeDir::new(&frontend_dir)
+                .precompressed_gzip()
                 .fallback(get(serve_index)),
         );
 

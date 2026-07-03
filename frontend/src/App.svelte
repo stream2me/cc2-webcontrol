@@ -11,6 +11,7 @@
   import TempPanel from './lib/TempPanel.svelte';
   import AMSPanel from './lib/AMSPanel.svelte';
   import DetectionPanel from './lib/DetectionPanel.svelte';
+  import BedMeshPanel from './lib/BedMeshPanel.svelte';
   import Controls from './lib/Controls.svelte';
   import FileList from './lib/FileList.svelte';
   import Toast from './lib/Toast.svelte';
@@ -120,13 +121,14 @@
     if (e.key === 'Escape') showSettings = false;
   }
 
-  $: showJobInfo   = $ui_settings.find(s => s.id === 'job-info')?.checked   ?? true;
-  $: showControl   = $ui_settings.find(s => s.id === 'control')?.checked    ?? true;
-  $: showDetection = $ui_settings.find(s => s.id === 'detection')?.checked  ?? true;
-  $: showFiles     = $ui_settings.find(s => s.id === 'files')?.checked      ?? true;
-  $: showCamera    = $ui_settings.find(s => s.id === 'camera')?.checked     ?? true;
+  $: showJobInfo   = $ui_settings.find(s => s.id === 'job-info')?.checked    ?? true;
+  $: showControl   = $ui_settings.find(s => s.id === 'control')?.checked     ?? true;
+  $: showDetection = $ui_settings.find(s => s.id === 'detection')?.checked   ?? true;
+  $: showFiles     = $ui_settings.find(s => s.id === 'files')?.checked       ?? true;
+  $: showCamera    = $ui_settings.find(s => s.id === 'camera')?.checked      ?? true;
   $: showTemp      = $ui_settings.find(s => s.id === 'temperature')?.checked ?? true;
-  $: showCanvas    = $ui_settings.find(s => s.id === 'canvas')?.checked     ?? true;
+  $: showCanvas    = $ui_settings.find(s => s.id === 'canvas')?.checked      ?? true;
+  $: showBedMesh   = $ui_settings.find(s => s.id === 'bedmesh')?.checked     ?? true;
 
 </script>
 
@@ -152,6 +154,7 @@
         {#if showJobInfo}<PrintHeader />{/if}
         {#if showControl}<Controls />{/if}
         {#if showDetection}<DetectionPanel />{/if}
+        {#if showBedMesh}<BedMeshPanel />{/if}
         {#if showFiles}<FileList />{/if}
       </div>
       <div class="col-right">

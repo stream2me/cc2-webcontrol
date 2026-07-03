@@ -11,3 +11,5 @@ pub mod logs;
 pub mod obico;
 pub mod snapshots;
 pub mod version;
+pub mod bedmesh;
+
