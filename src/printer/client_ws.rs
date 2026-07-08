@@ -112,8 +112,6 @@ impl MqttWsClient {
             &mut write,
             &[
                 (&register_response_topic, 1),
-                (&api_response_topic, 1),
-                (&api_status_topic, 0),
             ],
         )
         .await?;
@@ -136,9 +134,11 @@ impl MqttWsClient {
         let mut pending_thumb: Option<String> = None;
         let mut last_thumb_req: Option<tokio::time::Instant> = None;
 
-        // reconnect if no frames for 30s
-        let watchdog = tokio::time::sleep(Duration::from_secs(30));
+        // set timeout for first connection
+        let watchdog = tokio::time::sleep(Duration::from_secs(15));
         tokio::pin!(watchdog);
+
+        let mut last_frame_at = tokio::time::Instant::now();
 
         loop {
             tokio::select! {
@@ -153,7 +153,8 @@ impl MqttWsClient {
                 }
 
                 _ = &mut watchdog => {
-                    warn!("[ws] receive watchdog expired (30s no frames), reconnecting");
+                    let elapsed = last_frame_at.elapsed().as_secs();
+                    warn!("[ws] receive watchdog expired ({}s no frames), reconnecting", elapsed);
                     connected_tx.send(false).ok();
                     state_changed_tx.send(()).ok();
                     Self::drain_pending_rpcs(&pending_rpcs).await;
@@ -217,10 +218,15 @@ impl MqttWsClient {
                 msg = read.next() => {
                     match msg {
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
-                            watchdog.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(30));
+                            last_frame_at = tokio::time::Instant::now();
                             if let Some(packet) = mqtt.parse_packet(&data) {
                                 match packet {
                                     WsPacket::Publish { topic, payload, ack_id } => {
+                                        // reset Watchdog only on client specific topics
+                                        if topic == api_response_topic || topic == register_response_topic {
+                                            watchdog.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(30));
+                                        }
+
                                         // must PUBACK qos1 msgs or broker retry queue stalls
                                         // stalled retry queue blocks new responses
                                         if let Some(pid) = ack_id {
@@ -239,8 +245,24 @@ impl MqttWsClient {
                                         if topic == register_response_topic {
 
                                             if let Ok(val) = serde_json::from_slice::<Value>(&payload) {
-                                                if val.get("error").and_then(|e| e.as_str()) == Some("ok") {
+                                                let resp_client_id = val.get("client_id").and_then(|c| c.as_str());
+                                                let error = val.get("error").and_then(|e| e.as_str());
+
+                                                if resp_client_id == Some(client_id) && error == Some("ok") {
+                                                //if val.get("error").and_then(|e| e.as_str()) == Some("ok") {
                                                     registered = true;
+                                                    // set timeout to 30s after registered
+                                                    watchdog.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(30));
+
+                                                    mqtt.subscribe(
+                                                        &mut write,
+                                                        &[
+                                                            (&api_response_topic, 1),
+                                                            (&api_status_topic, 0),
+                                                        ],
+                                                    )
+                                                    .await?;
+
                                                     if connected_tx.send(true).is_err() {
                                                         warn!("[ws] connected_tx watcher dropped on connect");
                                                     }
