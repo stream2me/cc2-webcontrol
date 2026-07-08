@@ -14,6 +14,8 @@
     : printerState === 'connecting' ? 'Waiting for printer'
     : printerState === 'reconnecting' ? 'Reconnecting'
     : 'Offline';
+  $: pillOnline = serverConnected && connected;
+  $: pillWarn   = !serverConnected;
 </script>
 
 <header class="topbar">
