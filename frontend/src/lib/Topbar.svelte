@@ -4,13 +4,16 @@
 
   export let connected: boolean = false;
   export let serverConnected: boolean = true;
+  export let printerState: string = '';
   export let printerIp: string = '';
 
   const dispatch = createEventDispatcher<{ openSettings: void }>();
 
-  $: pillLabel = !serverConnected ? 'Server offline' : connected ? 'Connected' : 'Offline';
-  $: pillOnline = serverConnected && connected;
-  $: pillWarn   = !serverConnected;
+  $: pillLabel = !serverConnected ? 'Server offline'
+    : connected ? 'Connected'
+    : printerState === 'connecting' ? 'Waiting for printer'
+    : printerState === 'reconnecting' ? 'Reconnecting'
+    : 'Offline';
 </script>
 
 <header class="topbar">

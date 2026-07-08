@@ -77,6 +77,7 @@ export function connect() {
             ...s,
             state: msg.data as FullStatus,
             connected: msg.connected === true,
+            printer_ws_status: msg.printer_ws_status ?? s.printer_ws_status,
             printer_ip: msg.printer_ip ?? s.printer_ip,
             camera_connected: nowCameraConnected,
             phase: msg.phase ?? s.phase,

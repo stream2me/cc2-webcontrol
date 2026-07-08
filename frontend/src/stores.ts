@@ -192,6 +192,7 @@ export const printer = writable<PrinterState>({
   connected: false,
   printer_id: '',
   printer_ip: '',
+  printer_ws_status: 'connecting',
   camera_connected: false,
   state: null,
   phase: undefined,

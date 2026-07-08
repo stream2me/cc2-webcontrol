@@ -145,6 +145,7 @@
     <Topbar
       connected={$printer.connected}
       serverConnected={$wsConnected}
+      printerState={$printer.printer_ws_status}
       printerIp={$printer.printer_ip}
       on:openSettings={() => showSettings = true}
     />
