@@ -146,10 +146,12 @@ impl PrinterManager {
             let mut ws_rx = self.ws_connected_rx.clone();
             tokio::spawn(async move {
                 let mut was_connected = false;
+
                 loop {
                     let raw = *raw_rx.borrow();
                     let ws = *ws_rx.borrow();
-                    let new_connected = raw && ws;
+                    let new_connected = ws;
+
                     {
                         let mut s = state.write().await;
                         s.connected = new_connected;
