@@ -197,6 +197,7 @@ export interface PrinterStatusResponse {
   connected: boolean;
   connected_raw: boolean;
   connected_ws: boolean;
+  printer_ws_status: string;
   printer_id: string;
   printer_ip: string;
   state: Record<string, unknown> | null;

@@ -146,17 +146,29 @@ impl PrinterManager {
             let mut ws_rx = self.ws_connected_rx.clone();
             tokio::spawn(async move {
                 let mut was_connected = false;
+                let mut was_ws_connected = false;
 
                 loop {
                     let raw = *raw_rx.borrow();
                     let ws = *ws_rx.borrow();
                     let new_connected = ws;
 
+                    let printer_ws_status = if ws {
+                        was_ws_connected = true;
+                        "connected"
+                    } else if was_ws_connected {
+                        "reconnecting"
+                    } else {
+                        "connecting"
+                    };
+
+
                     {
                         let mut s = state.write().await;
                         s.connected = new_connected;
                         s.connected_raw = raw;
                         s.connected_ws = ws;
+                        s.printer_ws_status = printer_ws_status.to_string();
                         if was_connected && !new_connected {
                             s.clear_on_disconnect();
                             s.add_event(EventKind::Disconnected, "Printer disconnected".to_string());

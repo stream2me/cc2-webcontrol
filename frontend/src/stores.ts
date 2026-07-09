@@ -59,6 +59,7 @@ export interface PrinterState {
   connected: boolean;
   printer_id: string;
   printer_ip: string;
+  printer_ws_status: 'connecting' | 'connected' | 'reconnecting';
   camera_connected: boolean;
   state: FullStatus | null;
   phase?: PhaseInfo;

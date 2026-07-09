@@ -12,6 +12,7 @@ pub struct PrinterStatusResponse {
     pub connected: bool,
     pub connected_raw: bool,
     pub connected_ws: bool,
+    pub printer_ws_status: String,
     pub printer_id: String,
     pub printer_ip: String,
     pub state: Value,
@@ -26,6 +27,7 @@ pub async fn get_status(
     let connected = printer_state.connected;
     let connected_raw = printer_state.connected_raw;
     let connected_ws = printer_state.connected_ws;
+    let printer_ws_status = printer_state.printer_ws_status.clone();
     let phase = crate::printer::state::build_phase_info(
         printer_state.full.machine_status.status,
         printer_state.full.machine_status.sub_status,
@@ -37,6 +39,7 @@ pub async fn get_status(
         connected,
         connected_raw,
         connected_ws,
+        printer_ws_status,
         printer_id: state.manager.printer_id().await,
         printer_ip: state.manager.printer_ip().await,
         state: full,
