@@ -254,7 +254,6 @@ impl PrinterManager {
                 }
 
                 if was_long { backoff = 2; attempt = 1; }
-        // ws client
                 let sleep_secs = if clean && was_long { 1 } else { backoff };
                 info!("[raw] reconnecting in {sleep_secs}s (attempt {attempt})");
                 tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
@@ -343,9 +342,9 @@ impl PrinterManager {
     }
 
     pub async fn update_config(&self, new_config: AppConfig) {
+        let mut lc = self.lifecycle.lock().await;
         if self.running.load(Ordering::SeqCst) {
             self.running.store(false, Ordering::SeqCst);
-            let mut lc = self.lifecycle.lock().await;
             if let Some(tx) = lc.raw_shutdown.take() {
                 tx.send(true).ok();
             }
@@ -353,7 +352,6 @@ impl PrinterManager {
                 tx.send(true).ok();
             }
         }
-        let mut lc = self.lifecycle.lock().await;
         lc.config = new_config;
         lc.raw_client_id = format!("cc2_{}", rand_digits(4));
         lc.printer_id = lc.config.printer.printer_id.clone();

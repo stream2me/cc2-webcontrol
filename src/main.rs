@@ -21,10 +21,11 @@ use printer::manager::PrinterManager;
 use printer::state::EventKind;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const BIN_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[tokio::main]
 async fn main() {
-    println!("cc2-openwebui v{VERSION}");
+    println!("{BIN_NAME} v{VERSION}");
 
     let _ = std::fs::create_dir_all("data");
     let _ = std::fs::create_dir_all("snapshots");

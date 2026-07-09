@@ -327,7 +327,7 @@ impl PrinterState {
         self.events.push(e);
         self.events_total += 1;
         if self.events.len() > 100 {
-            self.events.remove(0);
+            self.events.pop_front();
         }
     }
 

@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const REPO: &str = "DimeusDev/cc2-openwebui";
+const REPO: &str = "stream2me/cc2-webcontrol";
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone)]
@@ -38,7 +38,7 @@ impl UpdateChecker {
             .client
             .get(&url)
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "cc2-openwebui-update-check")
+            .header("User-Agent", "cc2-webcontrol-update-check")
             .timeout(Duration::from_secs(15))
             .send()
             .await;
