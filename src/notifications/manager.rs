@@ -59,7 +59,7 @@ impl NotificationManager {
             let unprocessed = (events_total.saturating_sub(self.last_processed_total)) as usize;
             // cap by buffer
             let to_take = unprocessed.min(events.len());
-            let new: Vec<PrinterEvent> = events[events.len() - to_take..].to_vec();
+            let new: Vec<PrinterEvent> = events.iter().skip(events.len() - to_take).cloned().collect();
 
             self.last_processed_total = events_total;
 

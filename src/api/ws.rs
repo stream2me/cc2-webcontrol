@@ -182,7 +182,7 @@ fn build_state_msg(s: &PrinterState) -> serde_json::Value {
     let data = serde_json::to_value(&s.full).unwrap_or(json!({}));
     let det_history: Vec<_> = s.detection_history.iter().collect();
     let start = s.events.len().saturating_sub(20);
-    let recent_events: Vec<_> = s.events[start..].iter().map(|e| {
+    let recent_events: Vec<_> = s.events.iter().skip(start).map(|e| {
         let ts = e.timestamp.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         json!({
             "kind": event_kind_str(&e.kind),

@@ -77,7 +77,7 @@ async fn main() {
         if !past.is_empty() || total > 0 {
             let mut s = manager.state.write().await;
             s.events_total = total.max(past.len() as u64);
-            s.events = past;
+            s.events = past.into();
         }
     }
 

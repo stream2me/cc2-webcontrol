@@ -128,7 +128,7 @@ pub struct PrinterState {
     /// latest detections
     pub latest_detections: Vec<Detection>,
     pub latest_detection_ts: u64,
-    pub events: Vec<PrinterEvent>,
+    pub events: VecDeque<PrinterEvent>,
     /// event total mono
     pub events_total: u64,
     pub files: Vec<Value>,
@@ -191,7 +191,7 @@ impl PrinterState {
             detection_history: VecDeque::with_capacity(200),
             latest_detections: Vec::new(),
             latest_detection_ts: 0,
-            events: Vec::with_capacity(100),
+            events: VecDeque::with_capacity(100),
             events_total: 0,
             files: Vec::new(),
             thumbnail_cache: HashMap::new(),
@@ -310,7 +310,7 @@ impl PrinterState {
 
     pub fn add_event(&mut self, kind: EventKind, description: String) {
         // dedup same kind+msg
-        if let Some(last) = self.events.last() {
+        if let Some(last) = self.events.back() {
             if std::mem::discriminant(&last.kind) == std::mem::discriminant(&kind)
                 && last.description == description
             {
@@ -324,7 +324,7 @@ impl PrinterState {
             snapshot: None,
         };
         let _ = self.event_tx.send(e.clone());
-        self.events.push(e);
+        self.events.push_back(e);
         self.events_total += 1;
         if self.events.len() > 100 {
             self.events.pop_front();
@@ -344,10 +344,10 @@ impl PrinterState {
             snapshot,
         };
         let _ = self.event_tx.send(e.clone());
-        self.events.push(e);
+        self.events.push_back(e);
         self.events_total += 1;
         if self.events.len() > 100 {
-            self.events.remove(0);
+            self.events.pop_front();
         }
     }
 
