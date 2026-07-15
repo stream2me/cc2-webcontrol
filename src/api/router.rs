@@ -12,7 +12,6 @@ use super::camera;
 use super::detection;
 use super::logs;
 use super::notifications;
-use super::obico;
 use super::printer;
 use super::settings;
 use super::setup;
@@ -80,14 +79,12 @@ pub fn build_router(
 
     let api = Router::new()
         .nest_service("/snapshots", ServeDir::new("snapshots"))
-        .route("/health", get(health))
         .route("/api/setup/check", get(setup::check_setup))
         .route("/api/setup/scan", post(setup::scan_network))
         .route("/api/setup/verify", post(setup::verify_printer))
         .route("/api/setup/save", post(setup::save_config))
         .route("/api/setup/complete", post(setup::complete_onboarding))
         .route("/api/setup/reset", post(setup::reset_setup))
-        .route("/api/setup/host-os", get(setup::host_os))
         .route("/api/printer/status", get(printer::get_status))
         .route("/api/printer/pause", post(printer::pause_print))
         .route("/api/printer/resume", post(printer::resume_print))
@@ -117,12 +114,7 @@ pub fn build_router(
         .route("/api/detection/latest", get(detection::get_latest))
         .route("/api/detection/zones", axum::routing::put(detection::set_zones))
         .route("/api/detection/run", post(detection::run_detection))
-        .route("/api/setup/obico/status", get(obico::get_status))
-        .route("/api/setup/obico/start", post(obico::start_container))
-        .route("/api/setup/obico/start-stream", get(obico::start_container_stream))
-        .route("/api/setup/obico/test", get(obico::test_container))
-        .route("/api/setup/obico/test-url", post(obico::test_url))
-        .route("/api/setup/obico/stop", post(obico::stop_container))
+        .route("/api/setup/obico/test-url", post(setup::test_url))
         .route("/api/notifications/destinations",
             get(notifications::list_destinations).post(notifications::create_destination))
         .route("/api/notifications/destinations/:id",
@@ -169,13 +161,6 @@ fn find_frontend_dir() -> std::path::PathBuf {
             Some(dir)
         })
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-}
-
-async fn health() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({
-        "status": "ok",
-        "version": env!("CARGO_PKG_VERSION"),
-    }))
 }
 
 async fn serve_index() -> axum::response::Html<String> {

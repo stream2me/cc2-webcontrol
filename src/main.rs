@@ -3,7 +3,6 @@ mod camera;
 mod config;
 mod db;
 mod detection;
-mod docker;
 mod error;
 mod notifications;
 mod printer;

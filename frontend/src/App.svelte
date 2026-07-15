@@ -188,7 +188,7 @@
     <span class="update-text">{latestVersion ? `v${latestVersion} is available` : 'A new version is available'}</span>
     <a
       class="update-link"
-      href="https://github.com/DimeusDev/cc2-openwebui"
+      href="https://github.com/stream2me/cc2-webcontrol"
       target="_blank"
       rel="noopener noreferrer"
     >View on GitHub →</a>

@@ -38,19 +38,6 @@ export async function checkSetup(): Promise<{ configured: boolean; onboarding_co
   return res.json();
 }
 
-export interface HostOs {
-  os: 'linux' | 'macos' | 'windows' | string;
-  arch: string;
-  docker_command: string;
-  gpu_supported: boolean;
-}
-
-export async function getHostOs(): Promise<HostOs> {
-  const res = await fetch(`${BASE}/api/setup/host-os`);
-  if (!res.ok) await apiError(res, 'Failed to get host OS');
-  return res.json();
-}
-
 export interface EventToggles {
   print_started: boolean;
   print_finished: boolean;
@@ -143,31 +130,6 @@ export async function verifyPrinter(ip: string, pincode: string): Promise<{
     pincode: pincode || undefined,
   });
   if (!res.ok) await apiError(res, 'Connection verification failed');
-  return res.json();
-}
-
-export type ObicoStatus = 'unavailable' | 'not_created' | 'stopped' | 'running';
-
-export async function getObicoStatus(): Promise<{ status: ObicoStatus }> {
-  const res = await fetch(`${BASE}/api/setup/obico/status`);
-  if (!res.ok) await apiError(res, 'Failed to get Obico status');
-  return res.json();
-}
-
-export async function startObicoContainer(): Promise<{ success: boolean; url: string }> {
-  const res = await postJson(`${BASE}/api/setup/obico/start`, null);
-  if (!res.ok) await apiError(res, 'Failed to start Obico container');
-  return res.json();
-}
-
-export async function stopObicoContainer(): Promise<void> {
-  const res = await postJson(`${BASE}/api/setup/obico/stop`, null);
-  if (!res.ok) await apiError(res, 'Failed to stop Obico container');
-}
-
-export async function testObicoContainer(): Promise<{ ok: boolean }> {
-  const res = await fetch(`${BASE}/api/setup/obico/test`);
-  if (!res.ok) await apiError(res, 'Failed to test Obico container');
   return res.json();
 }
 

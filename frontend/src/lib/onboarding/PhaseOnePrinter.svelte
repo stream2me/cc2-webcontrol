@@ -3,12 +3,10 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import cc2Image from '../cc2.png';
-  import { scanNetwork, verifyPrinter, saveConfig, getHostOs } from '../../api';
+  import { scanNetwork, verifyPrinter, saveConfig } from '../../api';
   import { toErrorMessage } from '../errors';
 
-  const dispatch = createEventDispatcher<{
-    complete: { local_mode: boolean };
-  }>();
+  const dispatch = createEventDispatcher<{ complete: void }>();
 
   type Substep = 'intro' | 'scan' | 'configure' | 'verify';
   let substep: Substep = '';
@@ -22,21 +20,12 @@
   let verifying = false;
   let verifyProgress = '';
   let savingPrinter = false;
-  let local_mode = false;
 
   onMount(async () => {
-    try {
-      const info = await getHostOs();
-      if (info.local_mode) {
-        local_mode = true;
-        selectedIp = '';
-        manualIp = 'localhost';
-        await doVerify();
-      } else {
-        substep = 'intro';
-      }
-    } catch (e) {
-      console.warn('Failed to get host OS info:', e);
+    manualIp = '127.0.0.1';
+    await doVerify();
+    if (error) {
+      substep = 'intro';
     }
   });
 
@@ -82,7 +71,7 @@
       savingPrinter = true;
       await saveConfig(ip, result.printer_id, '');
       savingPrinter = false;
-      dispatch('complete', { local_mode });
+      dispatch('complete');
     } catch (e) {
       const msg = toErrorMessage(e).toLowerCase();
       if (msg.includes('timeout') || msg.includes('no response')) {
@@ -217,7 +206,7 @@
   <section class="card center">
     <div class="verify-stack">
       {#if savingPrinter || verifying}<div class="big-spinner"></div>{/if}
-      <h2>Verifying</h2>
+      <h2>Verifying Printer IP</h2>
       <p class="verify-line">{verifyProgress || 'Working…'}</p>
       {#if error}
         <div class="alert err">{error}</div>

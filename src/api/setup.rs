@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 use std::process::Command;
-use std::path::Path;
 
 use axum::extract::State;
 use axum::Json;
@@ -31,40 +30,6 @@ pub async fn check_setup(State(state): State<AppState>) -> Result<Json<SetupChec
         configured: !config.printer.ip.is_empty(),
         onboarding_complete: config.onboarding_complete,
     }))
-}
-
-#[derive(Serialize)]
-pub struct HostOsResponse {
-    pub os: &'static str,
-    pub arch: &'static str,
-    pub docker_command: String,
-    pub gpu_supported: bool,
-    pub local_mode: bool,
-}
-
-pub async fn host_os() -> Json<HostOsResponse> {
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-    let docker_command = build_docker_command(os);
-    let local_mode = Path::new("/opt/bin/elegoo_printer").is_file();
-    Json(HostOsResponse {
-        os,
-        arch,
-        docker_command,
-        gpu_supported: false,
-        local_mode,
-    })
-}
-
-fn build_docker_command(os: &str) -> String {
-    match os {
-        "linux" | "macos" => {
-            "docker run -d --name obico-ml --restart unless-stopped \\\n  \
-             --network host \\\n  \
-             ghcr.io/thespaghettidetective/ml_api:latest".to_string()
-        }
-        _ => String::new(),
-    }
 }
 
 #[derive(Deserialize)]
@@ -454,4 +419,29 @@ fn detect_local_subnets() -> Vec<String> {
 
     info!("detected local subnets: {:?}", subnets);
     subnets
+}
+
+#[derive(Deserialize)]
+pub struct TestObicoUrlRequest {
+    pub url: String,
+}
+
+pub async fn test_url(Json(req): Json<TestObicoUrlRequest>) -> Result<Json<Value>, AppError> {
+    let url = req.url.trim();
+    if url.is_empty() {
+        return Err(AppError::Validation("Obico URL is required".to_string()));
+    }
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(url)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+        .map_err(|e| AppError::Validation(format!("Could not reach Obico URL: {e}")))?;
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "status": res.status().as_u16(),
+    })))
 }

@@ -8,13 +8,11 @@
     back: void;
   }>();
 
-  export let local_mode = false;
-
-  let detectionEnabled = !local_mode;
+  let detectionEnabled = false;
   let notifyThreshold = 0.6;
   let pauseThreshold = 0.7;
-  let obicoUrl = 'http://localhost:3333/p/';
-  const obicoGuideUrl = 'https://github.com/DimeusDev/cc2-opencloud/docs/obicolm.md';
+  let obicoUrl = 'http://192.168.1.123:3333/p/';
+  const obicoGuideUrl = 'https://www.obico.io/docs/server-guides';
 
   let testUrlState: 'idle' | 'testing' | 'ok' | 'fail' = 'idle';
   let testUrlError = '';

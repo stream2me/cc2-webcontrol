@@ -8,7 +8,6 @@ pub mod notifications;
 pub mod ws;
 pub mod setup;
 pub mod logs;
-pub mod obico;
 pub mod snapshots;
 pub mod version;
 pub mod bedmesh;
