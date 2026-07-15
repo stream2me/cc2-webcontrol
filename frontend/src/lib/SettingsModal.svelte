@@ -11,11 +11,12 @@
   import SectionNotifications from './settings/SectionNotifications.svelte';
   import SectionLogs from './settings/SectionLogs.svelte';
   import SectionUI from './settings/SectionUI.svelte';
+  import SectionMaintenance from './settings/SectionMaintenance.svelte';
   import SectionDanger from './settings/SectionDanger.svelte';
 
   const dispatch = createEventDispatcher<{ close: void }>();
 
-  type Section = 'general' | 'detection' | 'notifications' | 'logs' | 'ui_settings' | 'danger';
+  type Section = 'general' | 'detection' | 'notifications' | 'logs' | 'ui_settings' | 'maintenance'| 'danger';
   export let initialSection: string = 'general';
   let activeSection: Section = (initialSection as Section) || 'general';
 
@@ -82,6 +83,7 @@
       title: 'Advanced',
       items: [
         { id: 'ui_settings', label: 'UI settings', desc: 'Modify UI', icon: 'layout' },
+        { id: 'maintenance', label: 'Maintenance', desc: 'Printer maintenance', icon: 'maintenance' },
         { id: 'danger', label: 'Danger Zone', desc: 'Reset everything', icon: 'warn' },
       ],
     },
@@ -93,6 +95,7 @@
     notifications: { title: 'Notifications', desc: 'Push events via ntfy or Discord webhook. Add and configure notification destinations.' },
     logs: { title: 'Activity Logs', desc: 'Connection events, print jobs, detections, etc' },
     ui_settings: { title: 'UI Settings', desc: 'Show or hide UI elements.' },
+    maintenance: { title: 'Maintenance', desc: 'restart printer or services.' },
     danger: { title: 'Danger Zone', desc: 'Irreversible actions. Make sure you know what you are doing.' },
   };
 </script>
@@ -163,6 +166,10 @@
                     <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
                     <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
                   </svg>
+                {:else if s.icon === 'maintenance'}
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                    <path d="M13.5 2.5a2.5 2.5 0 00-3.4-.1L7.3 5.2 3.8 1.7a1 1 0 00-1.4 0l-.7.7a1 1 0 000 1.4l3.5 3.5-2.8 2.8c-.4-.1-.8 0-1.1.3l-1 1a1 1 0 000 1.4l1.2 1.2a1 1 0 001.4 0l1-1c.3-.3.4-.7.3-1.1l2.8-2.8 3.5 3.5a1 1 0 001.4 0l.7-.7a1 1 0 000-1.4l-3.5-3.5 2.8-2.8a2.5 2.5 0 00-.1-3.4z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                    </svg>
                 {:else}
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
                     <rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
@@ -197,6 +204,8 @@
               <SectionLogs />
             {:else if activeSection === 'ui_settings'}
               <SectionUI />
+            {:else if activeSection === 'maintenance'}
+              <SectionMaintenance />
             {:else if activeSection === 'danger'}
               <SectionDanger />
             {/if}
@@ -205,7 +214,7 @@
       </div>
     </div>
 
-    {#if activeSection !== 'logs' && activeSection !== 'danger' && activeSection !== 'ui_settings'}
+    {#if ['general', 'detection', 'notifications'].includes(activeSection)}
       <div class="modal-foot">
         <div class="foot-left">
           {#if saveState === 'error'}

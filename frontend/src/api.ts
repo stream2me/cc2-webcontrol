@@ -571,3 +571,19 @@ export async function getAutosaveCfg(): Promise<string> {
   }
   return await response.text();
 }
+
+export async function restartServer(): Promise<void> {
+  const res = await postJson(`${BASE}/api/printer/restart_server`, {});
+
+  if (!res.ok) {
+    throw new Error('Restart failed');
+  }
+}
+
+export async function rebootPrinter(): Promise<void> {
+  const res = await postJson(`${BASE}/api/printer/reboot_printer`, {});
+
+  if (!res.ok) {
+    throw new Error('Reboot failed');
+  }
+}

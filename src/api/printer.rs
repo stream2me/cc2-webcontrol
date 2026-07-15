@@ -1,8 +1,9 @@
 use axum::extract::State;
 use axum::Json;
 use serde::Deserialize;
-use serde_json::Value;
-use tracing::debug;
+use serde_json::{json, Value};
+use tracing::{info ,error, debug};
+use std::process::Command;
 
 use super::router::AppState;
 use crate::error::AppError;
@@ -320,4 +321,34 @@ pub async fn get_thumbnail(
         "thumbnail": thumbnail,
         "filename": query.filename,
     })))
+}
+
+pub async fn restart_server() -> Json<Value> {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        info!("executing Server restart");
+        let _ = Command::new("/etc/init.d/webif")
+            .arg("restart")
+            .spawn();
+        info!("webcontrol restarted.");
+    });
+
+    Json(json!({ "success": true }))
+}
+
+pub async fn reboot_printer() -> Json<Value> {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        info!("Executing system reboot...");
+        match Command::new("/sbin/reboot").spawn() {
+            Ok(_) => {
+                info!("Reboot command dispatched successfully.");
+            }
+            Err(e) => {
+                error!("Failed to dispatch reboot command: {}", e);
+            }
+        }
+    });
+
+    Json(json!({ "success": true }))
 }

@@ -106,6 +106,8 @@ pub fn build_router(
             "/api/printer/upload",
             post(upload::upload_file).route_layer(DefaultBodyLimit::max(600 * 1024 * 1024)),
         )
+        .route("/api/printer/restart_server", post(printer::restart_server))
+        .route("/api/printer/reboot_printer", post(printer::reboot_printer))
         .route("/api/detection/status", get(detection::get_status))
         .route("/api/detection/toggle", post(detection::toggle))
         .route("/api/detection/config", post(detection::update_config))
