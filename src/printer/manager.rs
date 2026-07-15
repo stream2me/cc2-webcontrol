@@ -162,7 +162,6 @@ impl PrinterManager {
                         "connecting"
                     };
 
-
                     {
                         let mut s = state.write().await;
                         s.connected = new_connected;

@@ -43,10 +43,9 @@
     border-radius: 8px;
     background: var(--surface);
     overflow: hidden;
-    /* Neue Eigenschaften für begrenzte Breite */
-    width: auto;       /* Passt sich dem Inhalt an */
-    max-width: 200px;  /* Maximale Breite (kannst du anpassen) */
-    margin-left: 0 auto;    /* Zentriert den Rahmen */
+    width: auto;
+    max-width: 200px;
+    margin-left: 0 auto;
   }
 
   .row {

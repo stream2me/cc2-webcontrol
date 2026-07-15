@@ -181,7 +181,6 @@ static WEBIF_DIR: OnceLock<PathBuf> = OnceLock::new();
 fn webif_dir() -> PathBuf {
     WEBIF_DIR
         .get_or_init(|| {
-            // 1) CLI: --webif-dir /pfad/zum/dist
             let mut args = std::env::args().skip(1);
 
             while let Some(arg) = args.next() {
@@ -191,13 +190,12 @@ fn webif_dir() -> PathBuf {
                     }
                 }
 
-                // 2) CLI: --webif-dir=/pfad/zum/dist
                 if let Some(path) = arg.strip_prefix("--webif-dir=") {
                     return PathBuf::from(path);
                 }
             }
 
-            // 3) Default/Fallback
+            // Default/Fallback
             find_frontend_dir().join("frontend/dist")
         })
         .clone()
