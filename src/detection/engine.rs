@@ -71,17 +71,21 @@ impl DetectionEngine {
                     info!("[detection] enabled={}", self.enabled);
                 }
                 _ = config_rx.changed() => {
-                    let new_config = config_rx.borrow().clone();
-                    if new_config.obico_url != self.config.obico_url {
-                        self.obico = ObicoClient::new(&new_config.obico_url);
-                        info!("[detection] Obico client reinitialized (url={})", new_config.obico_url);
+                    if !self.enabled {
+                        debug!("[detection] config changed but detection disabled, skipping");
+                    } else {
+                        let new_config = config_rx.borrow().clone();
+                        if new_config.obico_url != self.config.obico_url {
+                            self.obico = ObicoClient::new(&new_config.obico_url);
+                            info!("[detection] Obico client reinitialized (url={})", new_config.obico_url);
+                        }
+                        if new_config.interval_secs != self.config.interval_secs {
+                            tick = interval(Duration::from_secs(new_config.interval_secs as u64));
+                            info!("[detection] poll interval updated to {}s", new_config.interval_secs);
+                        }
+                        self.config = new_config;
+                        info!("[detection] config updated");
                     }
-                    if new_config.interval_secs != self.config.interval_secs {
-                        tick = interval(Duration::from_secs(new_config.interval_secs as u64));
-                        info!("[detection] poll interval updated to {}s", new_config.interval_secs);
-                    }
-                    self.config = new_config;
-                    info!("[detection] config updated");
                 }
                 _ = tick.tick() => {
                     if !self.enabled {
