@@ -196,7 +196,7 @@ fn webif_dir() -> PathBuf {
             }
 
             // Default/Fallback
-            find_frontend_dir().join("frontend/dist")
+            find_frontend_dir().join("/opt/usr/.webcontrol/.frontend")
         })
         .clone()
 }
