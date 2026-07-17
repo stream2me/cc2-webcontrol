@@ -3,7 +3,7 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import cc2Image from '../cc2.png';
-  import { scanNetwork, verifyPrinter, saveConfig } from '../../api';
+  import { scanNetwork, verifyPrinter, saveConfig, checkSetup } from '../../api';
   import { toErrorMessage } from '../errors';
 
   const dispatch = createEventDispatcher<{ complete: void }>();
@@ -22,6 +22,11 @@
   let savingPrinter = false;
 
   onMount(async () => {
+    const setup = await checkSetup();
+    if (setup.configured) {
+      dispatch('complete');
+      return;
+    }
     manualIp = '127.0.0.1';
     await doVerify();
     if (error) {

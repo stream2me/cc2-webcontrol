@@ -200,6 +200,10 @@ impl PrinterManager {
         Ok(())
     }
 
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
     fn spawn_raw_client(
         &self,
         ip: &str,

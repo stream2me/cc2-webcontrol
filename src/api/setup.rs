@@ -345,20 +345,24 @@ pub async fn save_config(
         info!("printer config saved to db");
     }
 
-    let config_snapshot = state.config.read().await.clone();
-    state.manager.update_config(config_snapshot).await;
+    if !state.manager.is_running() {
+        let config_snapshot = state.config.read().await.clone();
+        state.manager.update_config(config_snapshot).await;
 
-    if let Err(e) = state.manager.start().await {
-        error!("failed to start printer manager after setup: {e}");
-        return Err(AppError::Setup(SetupError::VerificationFailed(
-            format!("Failed to start printer connection: {e}"),
-        )));
+        if let Err(e) = state.manager.start().await {
+            error!("failed to start printer manager after setup: {e}");
+            return Err(AppError::Setup(SetupError::VerificationFailed(
+                format!("Failed to start printer connection: {e}"),
+            )));
+        }
+        info!("printer manager started after setup for {}", req.ip);
+    } else {
+        info!("printer manager already running, skipping restart for {}", req.ip);
     }
 
     // camera loop must retarget after setup save
     let _ = state.camera_ip_tx.send(req.ip.clone());
 
-    info!("printer manager started after setup for {}", req.ip);
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
