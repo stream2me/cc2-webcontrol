@@ -209,7 +209,6 @@ async fn main() {
     };
 
     info!("server listening on http://{addr}");
-    println!("server listening on http://{addr}");
 
     if let Err(e) = axum::serve(listener, router).await {
         error!("server error: {e}");
