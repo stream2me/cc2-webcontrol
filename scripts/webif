@@ -1,0 +1,86 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=99
+
+DEPEND=mosquitto
+
+WORK_DIR="/opt/usr/.webcontrol"
+PROG="/opt/bin/webcontrol"
+PID="/var/run/webcontrol.pid"
+LOG="/var/log/webcontrol.log"
+
+PROG_NAME=$(basename "$PROG")
+
+log_msg() {
+    echo "$PROG_NAME: $1"
+    echo "$PROG_NAME: $1" > /dev/kmsg
+}
+
+start() {
+    if pidof webcontrol >/dev/null 2>&1; then
+        echo "$PROG_NAME: already running"
+        return 0
+    fi
+
+    local retry=0
+    local max_retries=60
+
+    while [ $retry -lt $max_retries ]; do
+        if pidof mosquitto >/dev/null 2>&1 && pidof elegoo_printer >/dev/null 2>&1; then
+            #sleep 30
+
+            if [ ! -d "$WORK_DIR" ]; then
+                mkdir -p "$WORK_DIR"
+            fi
+
+            cd "$WORK_DIR" || exit 1
+            sh -c "exec $PROG >> \"$LOG\" 2>&1" &
+            echo $! > "$PID"
+            log_msg "Service started."
+            return 0
+        else
+            sleep 1
+            retry=$((retry + 1))
+        fi
+    done
+    log_msg "Error - mosquitto or elegoo_printer not running."
+    return 1
+}
+
+stop() {
+    echo "$PROG_NAME: Stopping Service..."
+    PIDNUM=""
+    if [ -f "$PID" ]; then
+        PIDNUM=$(cat "$PID")
+        start-stop-daemon -K -p "$PID"
+        COUNT=0
+        while kill -0 "$PIDNUM" 2>/dev/null; do
+            sleep 1
+            COUNT=$((COUNT + 1))
+            if [ "$COUNT" -ge 10 ]; then
+                echo "$PROG_NAME: pid $PIDNUM still running, sending SIGKILL"
+                kill -9 "$PIDNUM" 2>/dev/null
+                break
+            fi
+        done
+    fi
+    # Fallback
+    RUNNING_PIDS="$(pidof webcontrol 2>/dev/null)"
+    if [ -n "$RUNNING_PIDS" ]; then
+        echo "$PROG_NAME: found remaining process(es): $RUNNING_PIDS"
+        kill $RUNNING_PIDS 2>/dev/null
+        COUNT=0
+        while pidof webcontrol >/dev/null 2>&1; do
+            sleep 1
+            COUNT=$((COUNT + 1))
+            if [ "$COUNT" -ge 5 ]; then
+                echo "$PROG_NAME: forcing shutdown of remaining process(es)"
+                kill -9 $(pidof webcontrol) 2>/dev/null
+                break
+            fi
+        done
+    fi
+    rm -f "$PID"
+    log_msg "Service stopped."
+}
