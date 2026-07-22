@@ -1,0 +1,173 @@
+name: Build frontend only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  FRONTEND_DIR: frontend
+  FRONTEND_DIST: frontend/dist
+
+concurrency:
+  group: frontend-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Svelte frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify frontend project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "${FRONTEND_DIR}/package.json" ]]; then
+            echo "::error::${FRONTEND_DIR}/package.json was not found."
+            exit 1
+          fi
+
+          if [[ ! -f "${FRONTEND_DIR}/package-lock.json" ]]; then
+            echo "::error::${FRONTEND_DIR}/package-lock.json was not found."
+            exit 1
+          fi
+
+      - name: Setup Node.js and restore npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Show tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --version
+          npm --version
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm ci \
+            --include=dev \
+            --no-audit \
+            --no-fund
+
+      - name: Verify frontend build tools
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -x node_modules/.bin/vite ]]; then
+            echo "::error::Vite was not found under node_modules/.bin."
+            echo "::error::Check whether vite is listed under devDependencies in package.json."
+            exit 1
+          fi
+
+          npm exec vite -- --version
+
+      - name: Read frontend metadata
+        id: frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FRONTEND_NAME="$(
+            node -p "require('./package.json').name"
+          )"
+
+          FRONTEND_VERSION="$(
+            node -p "require('./package.json').version"
+          )"
+
+          if [[ -z "${FRONTEND_NAME}" || "${FRONTEND_NAME}" == "undefined" ]]; then
+            echo "::error::Frontend name could not be read"
+            exit 1
+          fi
+
+          if [[ -z "${FRONTEND_VERSION}" || "${FRONTEND_VERSION}" == "undefined" ]]; then
+            echo "::error::Frontend version could not be read."
+            exit 1
+          fi
+
+          echo "Frontend: ${FRONTEND_NAME}"
+          echo "Version:  ${FRONTEND_VERSION}"
+
+          {
+            echo "name=${FRONTEND_NAME}"
+            echo "version=${FRONTEND_VERSION}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build frontend
+        working-directory: frontend
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+
+          npm run build
+
+      - name: Verify frontend build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -d "${FRONTEND_DIST}" ]]; then
+            echo "::error::Build directory '${FRONTEND_DIST}' does not exist."
+            exit 1
+          fi
+
+          FILE_COUNT="$(
+            find "${FRONTEND_DIST}" \
+              -type f \
+              | wc -l
+          )"
+
+          if [[ "${FILE_COUNT}" -eq 0 ]]; then
+            echo "::error::Build director '${FRONTEND_DIST}' is empty."
+            exit 1
+          fi
+
+          if [[ ! -f "${FRONTEND_DIST}/index.html" ]]; then
+            echo "::error::${FRONTEND_DIST}/index.html was not generated."
+            exit 1
+          fi
+
+          echo "Frontend build successful."
+          echo "Output: ${FRONTEND_DIST}"
+          echo "Files:  ${FILE_COUNT}"
+          echo "Size:   $(du -sh "${FRONTEND_DIST}" | cut -f1)"
+
+          echo "Generated files:"
+
+          find "${FRONTEND_DIST}" \
+            -type f \
+            -printf '%P (%s bytes)\n' \
+            | sort
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.frontend.outputs.name }}-${{ steps.frontend.outputs.version }}
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6

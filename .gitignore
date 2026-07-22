@@ -3,25 +3,10 @@
 /frontend/dist/
 /frontend/build/
 /frontend/.svelte-kit/
-/frontend/package-lock.json
-
-/snapshots/
-/tmp/
-/data/
 
 /config.toml
-!/config.example.toml
-
-.env
-
+/toolchain/
 /debug/
-
-/package-lock.json
 /.cargo/
 
-
-/toolchain/
 /scripts/build-webif.sh
-
-/Cargo.lock
-/Cargo.toml

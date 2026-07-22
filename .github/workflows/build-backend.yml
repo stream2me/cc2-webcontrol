@@ -1,0 +1,440 @@
+name: Build backend only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+  TARGET: armv7-unknown-linux-gnueabihf
+  TOOLCHAIN_DIR: ${{ github.workspace }}/.toolchain
+  TOOLCHAIN_CACHE_VERSION: "1"
+
+  RELEASE_API_URL: https://api.github.com/repos/elegooofficial/CentauriCarbon2/releases/tags/v1
+  RELEASE_ASSET_NAME: prebuilt.tar.gz
+
+concurrency:
+  group: backend-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-armv7:
+    name: Build Rust backend for ARMv7
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - name: Read Cargo package metadata
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          METADATA="$(cargo metadata --locked --no-deps --format-version 1)"
+
+          PACKAGE_NAME="$(
+            jq -r \
+              --arg manifest "${GITHUB_WORKSPACE}/Cargo.toml" \
+              '.packages[]
+               | select(.manifest_path == $manifest)
+               | .name' \
+              <<< "${METADATA}"
+          )"
+
+          PACKAGE_VERSION="$(
+            jq -r \
+              --arg manifest "${GITHUB_WORKSPACE}/Cargo.toml" \
+              '.packages[]
+               | select(.manifest_path == $manifest)
+               | .version' \
+              <<< "${METADATA}"
+          )"
+
+          BINARY_NAME="$(
+            jq -r \
+              --arg manifest "${GITHUB_WORKSPACE}/Cargo.toml" \
+              '.packages[]
+               | select(.manifest_path == $manifest)
+               | .targets[]
+               | select(.kind | index("bin"))
+               | .name' \
+              <<< "${METADATA}" |
+            head -n 1
+          )"
+
+          for VALUE_NAME in PACKAGE_NAME PACKAGE_VERSION BINARY_NAME; do
+            VALUE="${!VALUE_NAME}"
+
+            if [[ -z "${VALUE}" || "${VALUE}" == "null" ]]; then
+              echo "::error::${VALUE_NAME} could not be determined."
+              exit 1
+            fi
+          done
+
+          echo "Package: ${PACKAGE_NAME}"
+          echo "Version: ${PACKAGE_VERSION}"
+          echo "Binary:  ${BINARY_NAME}"
+
+          {
+            echo "PACKAGE_NAME=${PACKAGE_NAME}"
+            echo "PACKAGE_VERSION=${PACKAGE_VERSION}"
+            echo "BINARY_NAME=${BINARY_NAME}"
+          } >> "${GITHUB_ENV}"
+
+          {
+            echo "package_name=${PACKAGE_NAME}"
+            echo "package_version=${PACKAGE_VERSION}"
+            echo "binary_name=${BINARY_NAME}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # -----------------------------------------------------------------------
+      # Cross-Toolchain-Cache
+      # -----------------------------------------------------------------------
+
+      - name: Restore cross toolchain cache
+        id: cache-toolchain
+        uses: actions/cache@v6
+        with:
+          path: .toolchain
+          key: elegoo-cc2-toolchain-${{ runner.os }}-release-v1-cache-${{ env.TOOLCHAIN_CACHE_VERSION }}
+
+      - name: Download Elegoo cross toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          REMOTE_FILE="${RUNNER_TEMP}/${RELEASE_ASSET_NAME}"
+
+          JSON_DATA="$(
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "${RELEASE_API_URL}"
+          )"
+
+          TOOLCHAIN_URL="$(
+            jq -r \
+              --arg asset "${RELEASE_ASSET_NAME}" \
+              '.assets[]
+               | select(.name == $asset)
+               | .browser_download_url' \
+              <<< "${JSON_DATA}" |
+            head -n 1
+          )"
+
+          REMOTE_HASH="$(
+            jq -r \
+              --arg asset "${RELEASE_ASSET_NAME}" \
+              '.assets[]
+               | select(.name == $asset)
+               | .digest // empty' \
+              <<< "${JSON_DATA}" |
+            head -n 1
+          )"
+
+          if [[ -z "${TOOLCHAIN_URL}" || "${TOOLCHAIN_URL}" == "null" ]]; then
+            echo "::error::Release-Asset '${RELEASE_ASSET_NAME}' was not found."
+            exit 1
+          fi
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 5 \
+            --output "${REMOTE_FILE}" \
+            "${TOOLCHAIN_URL}"
+
+          test -s "${REMOTE_FILE}"
+
+          LOCAL_HASH="sha256:$(sha256sum "${REMOTE_FILE}" | awk '{print $1}')"
+
+          echo "Local digest:  ${LOCAL_HASH}"
+          echo "Remote digest: ${REMOTE_HASH:-<not provided>}"
+
+          if [[ -n "${REMOTE_HASH}" && "${REMOTE_HASH}" != "null" ]]; then
+            if [[ "${REMOTE_HASH,,}" != "${LOCAL_HASH,,}" ]]; then
+              echo "::error::The SHA-256 checksum of the toolchain does not match."
+              exit 1
+            fi
+          fi
+
+          rm -rf "${TOOLCHAIN_DIR}"
+          mkdir -p "${TOOLCHAIN_DIR}"
+
+          tar -xzf "${REMOTE_FILE}" \
+            -C "${TOOLCHAIN_DIR}" \
+            --strip-components=7 \
+            --wildcards \
+            "./prebuilt/gcc/linux-x86/arm/toolchain-sunxi-glibc/toolchain/*"
+
+          rm -f "${REMOTE_FILE}"
+
+          test -d "${TOOLCHAIN_DIR}/bin"
+
+      - name: Show toolchain cache status
+        shell: bash
+        run: |
+          echo "Exact cache hit: ${{ steps.cache-toolchain.outputs.cache-hit }}"
+
+      - name: Detect custom toolchain
+        id: toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TOOLCHAIN_BIN="${TOOLCHAIN_DIR}/bin"
+
+          if [[ -e "${TOOLCHAIN_BIN}/arm-openwrt-linux-gnueabi-gcc" ]]; then
+            CROSS_PREFIX="arm-openwrt-linux-gnueabi"
+          elif [[ -e "${TOOLCHAIN_BIN}/arm-openwrt-linux-gcc" ]]; then
+            CROSS_PREFIX="arm-openwrt-linux"
+          else
+            echo "::error::ARM cross-compiler was not found."
+
+            find "${TOOLCHAIN_BIN}" \
+              -maxdepth 1 \
+              -name '*gcc*' \
+              -printf '%f\n' \
+              | sort
+
+            exit 1
+          fi
+
+          chmod -R u+rx "${TOOLCHAIN_BIN}"
+
+          GCC="${TOOLCHAIN_BIN}/${CROSS_PREFIX}-gcc"
+          GXX="${TOOLCHAIN_BIN}/${CROSS_PREFIX}-g++"
+          AR="${TOOLCHAIN_BIN}/${CROSS_PREFIX}-ar"
+          RANLIB="${TOOLCHAIN_BIN}/${CROSS_PREFIX}-ranlib"
+          STRIP="${TOOLCHAIN_BIN}/${CROSS_PREFIX}-strip"
+          READELF="${TOOLCHAIN_BIN}/${CROSS_PREFIX}-readelf"
+
+          test -x "${GCC}"
+          test -x "${AR}"
+
+          SYSROOT="$("${GCC}" -print-sysroot 2>/dev/null || true)"
+
+          if [[ -n "${SYSROOT}" && "${SYSROOT}" != /* ]]; then
+            SYSROOT="$(
+              cd "$(dirname "${GCC}")"
+              realpath "${SYSROOT}"
+            )"
+          fi
+
+          if [[ -z "${SYSROOT}" || ! -d "${SYSROOT}" ]]; then
+            SYSROOT=""
+
+            for CANDIDATE in \
+              "${TOOLCHAIN_DIR}/arm-openwrt-linux-gnueabi/sysroot" \
+              "${TOOLCHAIN_DIR}/arm-openwrt-linux/sysroot" \
+              "${TOOLCHAIN_DIR}/arm-openwrt-linux-gnueabi" \
+              "${TOOLCHAIN_DIR}/arm-openwrt-linux"
+            do
+              if [[ -d "${CANDIDATE}" ]]; then
+                SYSROOT="$(realpath "${CANDIDATE}")"
+                break
+              fi
+            done
+          fi
+
+          echo "Compiler: ${GCC}"
+          echo "Target:   $("${GCC}" -dumpmachine)"
+          echo "Prefix:   ${CROSS_PREFIX}"
+          echo "Sysroot:  ${SYSROOT:-<internal GCC paths>}"
+
+          {
+            echo "bin=${TOOLCHAIN_BIN}"
+            echo "gcc=${GCC}"
+            echo "gxx=${GXX}"
+            echo "ar=${AR}"
+            echo "ranlib=${RANLIB}"
+            echo "strip=${STRIP}"
+            echo "readelf=${READELF}"
+            echo "prefix=${CROSS_PREFIX}"
+            echo "sysroot=${SYSROOT}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "${TOOLCHAIN_BIN}" >> "${GITHUB_PATH}"
+
+      # -----------------------------------------------------------------------
+      # Rust-Cache
+      # -----------------------------------------------------------------------
+
+      - name: Restore Cargo dependency cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Restore Rust build cache
+        uses: actions/cache@v6
+        with:
+          path: target
+          key: rust-target-${{ runner.os }}-${{ env.TARGET }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'build.rs') }}
+          restore-keys: |
+            rust-target-${{ runner.os }}-${{ env.TARGET }}-
+
+      - name: Create Cargo configuration
+        shell: bash
+        env:
+          GCC: ${{ steps.toolchain.outputs.gcc }}
+          AR: ${{ steps.toolchain.outputs.ar }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${GITHUB_WORKSPACE}/.cargo"
+
+          cat > "${GITHUB_WORKSPACE}/.cargo/config.toml" <<EOF
+          [target.${TARGET}]
+          linker = "${GCC}"
+          ar = "${AR}"
+          EOF
+
+          cat "${GITHUB_WORKSPACE}/.cargo/config.toml"
+
+      - name: Configure build environment
+        shell: bash
+        env:
+          GCC: ${{ steps.toolchain.outputs.gcc }}
+          GXX: ${{ steps.toolchain.outputs.gxx }}
+          AR: ${{ steps.toolchain.outputs.ar }}
+          RANLIB: ${{ steps.toolchain.outputs.ranlib }}
+          STRIP: ${{ steps.toolchain.outputs.strip }}
+          SYSROOT: ${{ steps.toolchain.outputs.sysroot }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=${GCC}"
+            echo "CC_armv7_unknown_linux_gnueabihf=${GCC}"
+            echo "AR_armv7_unknown_linux_gnueabihf=${AR}"
+            echo "RANLIB_armv7_unknown_linux_gnueabihf=${RANLIB}"
+            echo "STRIP_armv7_unknown_linux_gnueabihf=${STRIP}"
+            echo "PKG_CONFIG_ALLOW_CROSS=1"
+          } >> "${GITHUB_ENV}"
+
+          if [[ -x "${GXX}" ]]; then
+            echo "CXX_armv7_unknown_linux_gnueabihf=${GXX}" \
+              >> "${GITHUB_ENV}"
+          fi
+
+          if [[ -n "${SYSROOT}" && -d "${SYSROOT}" ]]; then
+            echo "PKG_CONFIG_SYSROOT_DIR=${SYSROOT}" \
+              >> "${GITHUB_ENV}"
+
+            PKG_CONFIG_LIBDIR="$(
+              find "${SYSROOT}" \
+                -type d \
+                -name pkgconfig \
+                -print 2>/dev/null |
+              paste -sd ':' -
+            )"
+
+            if [[ -n "${PKG_CONFIG_LIBDIR}" ]]; then
+              echo "PKG_CONFIG_LIBDIR=${PKG_CONFIG_LIBDIR}" \
+                >> "${GITHUB_ENV}"
+            fi
+          fi
+
+      - name: Verify toolchain
+        shell: bash
+        env:
+          GCC: ${{ steps.toolchain.outputs.gcc }}
+        run: |
+          set -euo pipefail
+
+          "${GCC}" --version
+          "${GCC}" -dumpmachine
+
+          echo "libc:"
+          "${GCC}" -print-file-name=libc.so
+
+          echo "crt1:"
+          "${GCC}" -print-file-name=crt1.o
+
+          rustc --version
+          cargo --version
+
+      - name: Build backend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cargo build \
+            --locked \
+            --release \
+            --target "${TARGET}" \
+            --bin "${BINARY_NAME}"
+
+      - name: Verify backend binary
+        shell: bash
+        env:
+          READELF: ${{ steps.toolchain.outputs.readelf }}
+        run: |
+          set -euo pipefail
+
+          BINARY="target/${TARGET}/release/${BINARY_NAME}"
+
+          if [[ ! -f "${BINARY}" ]]; then
+            echo "::error::Binary was not found: ${BINARY}"
+            exit 1
+          fi
+
+          file "${BINARY}"
+
+          if [[ -x "${READELF}" ]]; then
+            "${READELF}" --file-header "${BINARY}"
+            "${READELF}" --arch-specific "${BINARY}" || true
+          fi
+
+      - name: Prepare backend artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE="target/${TARGET}/release/${BINARY_NAME}"
+          ARTIFACT_FILE="${PACKAGE_NAME}-${PACKAGE_VERSION}-${TARGET}"
+
+          mkdir -p dist
+          install -m 0755 "${SOURCE}" "dist/${ARTIFACT_FILE}"
+
+          echo "artifact_file=${ARTIFACT_FILE}" >> "${GITHUB_OUTPUT}"
+
+          ls -lh "dist/${ARTIFACT_FILE}"
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.package_name }}-${{ steps.package.outputs.package_version }}-armv7
+          path: dist/${{ steps.artifact.outputs.artifact_file }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

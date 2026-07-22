@@ -1,0 +1,31 @@
+[package]
+name = "webcontrol"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+axum = { version = "0.7", features = ["ws"] }
+rumqttc = "0.24"
+tokio-tungstenite = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
+bytes = "1"
+futures = "0.3"
+thiserror = "1"
+rand = "0.8"
+md5 = "0.7"
+tower-http = { version = "0.5", features = ["fs"] }
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio"] }
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
