@@ -1,3 +1,4 @@
+[![Release](https://img.shields.io/github/v/release/stream2me/cc2-webcontrol)](https://github.com/stream2me/cc2-webcontrol/releases/latest) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/stream2me/cc2-webcontrol)
 # cc2-webcontrol
 
 cc2-webcontrol is a standalone Web UI for the Elegoo Centauri Carbon 2, designed to run directly on the printer without requiring a Docker container.
