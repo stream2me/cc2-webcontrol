@@ -20,8 +20,9 @@
   $: isPrinting = printState === 'printing';
   $: isPaused = printState === 'paused';
   $: isActive = isPrinting || isPaused;
-  $: phaseInfo = $printer.phase ?? { label: $printer.connected ? 'Idle' : 'Offline', variant: $printer.connected ? 'idle' : 'error' };
+  $: phaseInfo = $printer.phase ?? {label: $printer.connected ? 'Idle' : 'Offline', detail: undefined, protocol_name: undefined, variant: $printer.connected ? 'idle' : 'error'};
   $: phaseLabel = phaseInfo.label;
+  $: phaseDetail = phaseInfo.detail;
   $: phaseVariant = phaseInfo.variant;
 
   let stopping = false;
@@ -200,10 +201,18 @@
       <div class="job-top-row">
         <span class="filename" title={filename}>{shortName(filename)}</span>
         <div class="job-badges">
-          <span class="badge {phaseVariant}">{phaseLabel}</span>
-        </div>
-      </div>
+            <span class="badge {phaseVariant}">
+                {phaseLabel}
+            </span>
 
+            {#if phaseDetail}
+                <span class="phase-detail" title={phaseInfo.protocol_name ?? undefined}>
+                    {phaseDetail}
+                </span>
+            {/if}
+        </div>
+    </div>
+    
       {#if isActive}
         <div class="progress-row">
           <span class="progress-pct">{progress}%</span>
@@ -357,7 +366,23 @@
     color: var(--text);
   }
 
-  .job-badges { flex-shrink: 0; }
+  .phase-detail {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--muted);
+    white-space: nowrap;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .job-badges {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
 
   .badge {
     font-size: 11px;

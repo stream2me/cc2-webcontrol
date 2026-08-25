@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { printer, events, showToast } from './stores';
-import type { FullStatus, AppEvent, DetectionPoint } from './stores';
+import type { FullStatus, AppEvent, DetectionPoint, PhaseInfo } from './stores';
 
 export const wsConnected = writable(false);
 export const wsError = writable<string | null>(null);
@@ -13,7 +13,7 @@ let lastPongAt = 0;
 let lastStateTs = 0;
 // skip transition toasts until first state
 let prevCameraConnected: boolean | null = null;
-let prevMachineStatus: number | null = null;
+let prevMachinePhase: { status: number; sub_status: number } | null = null;
 
 export function connect() {
   if (ws) return;
@@ -39,6 +39,7 @@ export function connect() {
     lastPongAt = Date.now();
     lastStateTs = 0;
     prevCameraConnected = null;
+    prevMachinePhase = null;
   };
 
   ws.onmessage = (e) => {
@@ -102,13 +103,36 @@ export function connect() {
         }
         prevCameraConnected = nowCameraConnected;
 
-        const nowMachineStatus = (msg.data as FullStatus)?.machine_status?.status;
-        if (nowMachineStatus !== undefined) {
-          const phaseInfo = msg.phase as { label: string; variant: string } | undefined;
-          if (msg.connected === true && prevMachineStatus !== null && nowMachineStatus !== prevMachineStatus && phaseInfo?.variant === 'error') {
-            showToast(`Printer: ${phaseInfo.label}`, 'error', 8000);
-          }
-          prevMachineStatus = nowMachineStatus;
+
+        const machineStatus = (msg.data as FullStatus)?.machine_status;
+
+        const nowMachinePhase = machineStatus
+            ? {
+                status: machineStatus.status,
+                sub_status: machineStatus.sub_status,
+            }
+            : null;
+
+        if (nowMachinePhase) {
+            const phaseInfo = msg.phase as PhaseInfo | undefined;
+        
+            if (
+                msg.connected === true &&
+                prevMachinePhase !== null &&
+                (
+                    nowMachinePhase.status !== prevMachinePhase.status ||
+                    nowMachinePhase.sub_status !== prevMachinePhase.sub_status
+                ) &&
+                phaseInfo?.variant === 'error'
+            ) {
+                showToast(
+                    `Printer: ${phaseInfo.label}`,
+                    'error',
+                    8000
+                );
+            }
+        
+            prevMachinePhase = nowMachinePhase;
         }
 
       } else if (msg.type === 'event' && msg.data) {

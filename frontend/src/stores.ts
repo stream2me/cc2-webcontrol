@@ -51,8 +51,14 @@ export interface PrinterFile {
 }
 
 export interface PhaseInfo {
-  label: string;
-  variant: string;
+    /// Main machine status.
+    label: string;
+    /// Detailed status within the main status.
+    detail?: string;
+    /// CC2 protocol name of the detailed status.
+    protocol_name?: string;
+    /// Existing frontend variant.
+    variant: string;
 }
 
 export interface PrinterState {
