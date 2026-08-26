@@ -10,10 +10,84 @@
   $: nStat = tempStatus(nozzleTemp, nozzleTarget);
   $: bStat = tempStatus(bedTemp, bedTarget);
 
+  let nozzleTargetInput = 0;
+  let bedTargetInput = 0;
+  let nozzleEditing = false;
+  let bedEditing = false;
+
+  $: if (!nozzleEditing) {
+    nozzleTargetInput = nozzleTarget;
+  }
+
+  $: if (!bedEditing) {
+    bedTargetInput = bedTarget;
+  }
+
   function tempStatus(current: number, target: number): 'off' | 'heating' | 'ready' {
     if (target === 0) return 'off';
     if (current < target - 5) return 'heating';
     return 'ready';
+  }
+
+  async function setTemperature(name: 'extruder' | 'heater_bed', temp: number) {
+    temp = Math.round(temp);
+
+    if (!Number.isFinite(temp) || temp < 0) return;
+
+    const currentTemp = name === 'extruder'
+      ? Math.round(nozzleTemp)
+      : Math.round(bedTemp);
+
+    if (temp !== 0 && temp === currentTemp) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/printer/temp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, temp })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to set temperature:', response.status);
+      }
+    } catch (err) {
+      console.error('Failed to set temperature:', err);
+    }
+  }
+
+  function handleTemperatureKey(
+    event: KeyboardEvent,
+    name: 'extruder' | 'heater_bed',
+    value: number
+  ) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      setTemperature(name, value);
+      (event.currentTarget as HTMLInputElement).blur();
+    }
+  }
+
+  function changeTemperature(
+    name: 'extruder' | 'heater_bed',
+    delta: number
+  ) {
+    const current = name === 'heater_bed'
+      ? bedTargetInput
+      : nozzleTargetInput;
+  
+    const newValue = Math.max(0, Math.min(125, Math.round(current + delta)));
+  
+    if (name === 'heater_bed') {
+      bedTargetInput = newValue;
+    } else {
+      nozzleTargetInput = newValue;
+    }
+  
+    setTemperature(name, newValue);
   }
 </script>
 
@@ -42,11 +116,42 @@
         <span class="temp-cur {nStat} mono">{Math.round(nozzleTemp)}°</span>
       </div>
       <div class="col-tgt ra">
-        {#if nozzleTarget > 0}
-          <span class="temp-tgt mono">{nozzleTarget}°</span>
-        {:else}
-          <span class="temp-tgt dim">-</span>
-        {/if}
+        <div class="temp-input-wrap">
+          <input
+            class="temp-input mono"
+            type="number"
+            min="0"
+            max="365"
+            bind:value={nozzleTargetInput}
+            on:focus={() => nozzleEditing = true}
+            on:blur={() => nozzleEditing = false}
+            on:keydown={(event) => handleTemperatureKey(event, 'extruder', nozzleTargetInput)}
+            aria-label="Nozzle target temperature"
+          />
+          <span>°</span>
+          <div class="temp-stepper">
+            <button
+              type="button"
+              class="temp-step"
+              aria-label="Increase Extruder temperature"
+              on:click={() => changeTemperature('extruder', 1)}
+            >
+              <svg viewBox="0 0 10 6" aria-hidden="true">
+                <path d="M1 5L5 1L9 5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="temp-step"
+              aria-label="Decrease Extruder temperature"
+              on:click={() => changeTemperature('extruder', -1)}
+            >
+              <svg viewBox="0 0 10 6" aria-hidden="true">
+                <path d="M1 1L5 5L9 1" />
+              </svg>
+          </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -63,11 +168,42 @@
         <span class="temp-cur {bStat} mono">{Math.round(bedTemp)}°</span>
       </div>
       <div class="col-tgt ra">
-        {#if bedTarget > 0}
-          <span class="temp-tgt mono">{bedTarget}°</span>
-        {:else}
-          <span class="temp-tgt dim">-</span>
-        {/if}
+        <div class="temp-input-wrap">
+          <input
+            class="temp-input mono"
+            type="number"
+            min="0"
+            max="125"
+            bind:value={bedTargetInput}
+            on:focus={() => bedEditing = true}
+            on:blur={() => bedEditing = false}
+            on:keydown={(event) => handleTemperatureKey(event, 'heater_bed', bedTargetInput)}
+            aria-label="Heated bed target temperature"
+          />
+          <span>°</span>
+          <div class="temp-stepper">
+            <button
+              type="button"
+              class="temp-step"
+              aria-label="Increase heated bed temperature"
+              on:click={() => changeTemperature('heater_bed', 1)}
+            >
+              <svg viewBox="0 0 10 6" aria-hidden="true">
+                <path d="M1 5L5 1L9 5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="temp-step"
+              aria-label="Decrease heated bed temperature"
+              on:click={() => changeTemperature('heater_bed', -1)}
+            >
+              <svg viewBox="0 0 10 6" aria-hidden="true">
+                <path d="M1 1L5 5L9 1" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -156,4 +292,75 @@
     color: var(--muted);
   }
   .temp-tgt.dim { color: var(--muted2); }
+
+  .temp-input-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    color: var(--muted);
+  }
+
+  .temp-input {
+    width: 42px;
+    padding: 2px 0;
+    border: none;
+    border-bottom: 1px solid transparent;
+    outline: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: right;
+    appearance: textfield;
+  }
+
+  .temp-input::-webkit-inner-spin-button,
+  .temp-input::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+  }
+
+  .temp-input:focus {
+    border-bottom-color: var(--accent);
+    color: var(--text);
+  }
+
+  .temp-stepper {
+    display: flex;
+    flex-direction: column;
+    margin-left: 3px;
+    line-height: 1;
+  }
+
+  .temp-step {
+    width: 12px;
+    height: 9px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: var(--muted2);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .temp-step svg {
+    width: 8px;
+    height: 5px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .temp-step:hover {
+    color: var(--accent);
+  }
+
+  .temp-step:active {
+    color: var(--text);
+  }
 </style>

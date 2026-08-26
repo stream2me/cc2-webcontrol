@@ -192,6 +192,21 @@ pub async fn set_fan(
 }
 
 #[derive(Deserialize)]
+pub struct TempRequest {
+    pub name: String,
+    pub temp: u16,
+}
+
+pub async fn set_temp(
+    State(state): State<AppState>,
+    Json(req): Json<TempRequest>,
+) -> Result<Json<Value>, AppError> {
+    debug!("API: set_temp {}={}", req.name, req.temp);
+    state.manager.set_temp(&req.name, req.temp).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
 pub struct SpeedModeRequest {
     pub mode: u8,
 }

@@ -12,7 +12,7 @@ use super::models::{
     METHOD_GET_AMS_INFO, METHOD_GET_FILE_INFO, METHOD_GET_FILE_LIST, METHOD_GET_FILE_THUMBNAIL,
     METHOD_GET_FULL_STATUS, METHOD_GET_PRINT_HISTORY, METHOD_HOME_AXES, METHOD_JOG_AXIS,
     METHOD_PAUSE_PRINT, METHOD_RESUME_PRINT, METHOD_SET_AMS_AUTO_REFILL, METHOD_SET_FAN,
-    METHOD_SET_LED, METHOD_SET_SPEED_MODE, METHOD_START_PRINT, METHOD_STOP_PRINT,
+    METHOD_SET_LED, METHOD_SET_SPEED_MODE, METHOD_SET_TEMPERATURE, METHOD_START_PRINT, METHOD_STOP_PRINT,
 };
 use super::state::{EventKind, PrinterEvent, PrinterState};
 use crate::config::AppConfig;
@@ -448,6 +448,16 @@ impl PrinterManager {
         self.state.write().await.add_event(
             EventKind::CommandSpeedMode,
             format!("Speed mode → {}", mode),
+        );
+        Ok(())
+    }
+
+    pub async fn set_temp(&self, name: &str, temp: u16) -> Result<(), PrinterError> {
+        info!("[cmd] set_temp name={name} temp={temp}");
+        self.rpc_cmd(METHOD_SET_TEMPERATURE, Some(serde_json::json!({ name: temp })), 5).await?;
+        self.state.write().await.add_event(
+            EventKind::CommandTemp,
+            format!("Temperature '{}' → {}", name, temp),
         );
         Ok(())
     }

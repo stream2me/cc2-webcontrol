@@ -93,6 +93,7 @@ pub fn build_router(
         .route("/api/printer/jog", post(printer::jog_axis))
         .route("/api/printer/led", post(printer::set_led))
         .route("/api/printer/fan", post(printer::set_fan))
+        .route("/api/printer/temp", post(printer::set_temp))
         .route("/api/printer/speed-mode", post(printer::set_speed_mode))
         .route("/api/printer/print", post(printer::start_print))
         .route("/api/printer/files", get(printer::get_files))

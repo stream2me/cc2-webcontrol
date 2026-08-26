@@ -95,6 +95,7 @@ pub enum EventKind {
     CommandLed,
     CommandFan,
     CommandSpeedMode,
+    CommandTemp,
     CommandStartPrint,
     DetectionLogged,
     CameraLost,
