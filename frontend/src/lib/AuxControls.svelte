@@ -14,6 +14,8 @@
 
   let error = '';
 
+  const fanTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
+
   const SPEED_MODES = [
     { val: 0, label: 'Silent' },
     { val: 1, label: 'Balanced' },
@@ -26,24 +28,38 @@
   let ledPending: boolean | null = null;
 
   $: displayLed = ledPending ?? ledOn;
+  $: if (ledPending !== null && ledOn === ledPending) ledPending = null;
 
   function fanToPercent(raw: number) { return Math.round((raw / 255) * 100); }
   function percentToFan(pct: number) { return Math.round((pct / 100) * 255); }
 
-  function queueFan(name: string, pct: number) {
-    clearTimeout(timers[name]);
-    error = '';
-    pending = { ...pending, [name]: pct };
-    timers[name] = setTimeout(async () => {
-      try {
-        await setFan(name, percentToFan(pct));
-      } catch (e) {
-        error = toErrorMessage(e);
-      } finally {
-        const { [name]: _, ...rest } = pending;
-        pending = rest;
-      }
-    }, 350);
+  function queueFan(name: string, pct: number) {  
+    clearTimeout(timers[name]);  
+    error = '';  
+    pending = { ...pending, [name]: pct };  
+    timers[name] = setTimeout(async () => {  
+      try {  
+        await setFan(name, percentToFan(pct));  
+        clearTimeout(fanTimeouts[name]);  
+        fanTimeouts[name] = setTimeout(() => {  
+          const { [name]: _, ...rest } = pending;  
+          pending = rest;  
+        }, 2000);  
+      } catch (e) {  
+        error = toErrorMessage(e);  
+        const { [name]: _, ...rest } = pending;  
+        pending = rest;  
+      }  
+    }, 350);  
+  }
+
+  $: for (const name of Object.keys(pending)) {  
+    const raw = name === 'fan' ? fanSpeed : name === 'aux_fan' ? auxFanSpeed : boxFanSpeed;  
+    if (fanToPercent(raw) === pending[name]) {  
+      clearTimeout(fanTimeouts[name]);  
+      const { [name]: _, ...rest } = pending;  
+      pending = rest;  
+    }  
   }
 
   function stepFan(name: string, raw: number, delta: number) {
@@ -56,17 +72,18 @@
     queueFan(name, base > 0 ? 0 : 50);
   }
 
-  async function handleLed(on: boolean) {
-    ledPending = on;
-    error = '';
-    try {
-      await setLed(on);
-    } catch (e) {
-      error = toErrorMessage(e);
-      ledPending = null;
-    } finally {
-      ledPending = null;
-    }
+  async function handleLed(on: boolean) {  
+    ledPending = on;  
+    error = '';  
+    const timeout = setTimeout(() => { if (ledPending === on) ledPending = null; }, 2000);  
+    try {  
+      await setLed(on);  
+    } catch (e) {  
+      error = toErrorMessage(e);  
+      ledPending = null;  
+    } finally {  
+      clearTimeout(timeout);  
+    }  
   }
 
   async function handleSpeedMode(e: Event) {
