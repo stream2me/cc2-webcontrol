@@ -10,6 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
   TARGET: armv7-unknown-linux-gnueabihf
+  STAGING_DIR: /home/runner/work/cc2-webcontrol/cc2-webcontrol/.toolchain
   TOOLCHAIN_DIR: ${{ github.workspace }}/.toolchain
   TOOLCHAIN_CACHE_VERSION: "1"
 
