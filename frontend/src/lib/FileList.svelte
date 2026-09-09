@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { printer, showToast } from '../stores';
+  import { showToast } from '../stores';
   import { getFiles, getHistory, startPrint, uploadGcode, type HistoryTask } from '../api';
   import type { PrinterFile } from '../stores';
   import { toErrorMessage } from './errors';
@@ -10,18 +10,52 @@
   let activeTab: 'local' | 'udisk' | 'history' = 'local';
   let loading = false;
   let error = '';
+  let usbError = '';
   let historyFiles: PrinterFile[] = [];
+  let localFiles: PrinterFile[] = [];
+  let usbFiles: PrinterFile[] = [];
+
+  let localPath = '/';
+  let usbPath = '/';
+
+  let localOffset = 0;
+  let localTotal = 0;
+  let localMaxSite = 1;
+  let localPageNumber = 1;
+  let localPageSize = 10;
+  let localPageHistory = {};
+
+  let usbOffset = 0;
+  let usbTotal = 0;
+  let usbMaxSite = 1;
+  let usbPageNumber = 1;
+  let usbPageSize = 10;
+  let usbPageHistory = {};
+
+  let historyPageNumber = 1;
+  let historyPageSize = 10;
+  let historyTotal = 0;
+  let historyMaxSite = 1;
 
   let printModalOpen = false;
   let printModalFile: PrinterFile | null = null;
 
-  $: files = $printer.files;
-
   async function loadFiles() {
     loading = true;
     error = '';
+
     try {
-      await getFiles('local', 1, 50);
+      const result = await getFiles(
+        'local',
+        localPath,
+        localPageNumber,
+        localPageSize
+      );
+
+      localFiles = result.file_list;
+      localOffset = result.offset;
+      localTotal = result.total;
+      localMaxSite = Math.max(1, Math.ceil(localTotal / localPageSize));
     } catch (e) {
       error = toErrorMessage(e);
     } finally {
@@ -32,17 +66,53 @@
   async function loadHistory() {
     loading = true;
     error = '';
+
     try {
-      const res = await getHistory();
-      const list: HistoryTask[] = res.history ?? [];
+      const res = await getHistory(
+        historyPageNumber,
+        historyPageSize
+      );
+      const list: HistoryTask[] = res.history_task_list ?? [];
+
       historyFiles = list.map((t) => ({
         ...t,
         filename: t.filename ?? t.task_name ?? '',
         name: t.name ?? t.task_name ?? '',
         create_time: t.create_time ?? t.begin_time ?? 0,
       })) as PrinterFile[];
+
+      historyTotal = res.total ?? 0;
+
+      historyMaxSite = Math.max(
+        1,
+        Math.ceil(historyTotal / historyPageSize)
+      );
+
     } catch (e) {
       error = toErrorMessage(e);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function loadUsbFiles() {
+    loading = true;
+    usbError = '';
+
+    try {
+      const result = await getFiles(
+        'u-disk',
+        usbPath,
+        usbPageNumber,
+        usbPageSize
+      );
+
+      usbFiles = result.file_list;
+      usbOffset = result.offset;
+      usbTotal = result.total;
+      usbMaxSite = Math.max(1, Math.ceil(usbTotal / usbPageSize));
+    } catch (e) {
+      usbError = toErrorMessage(e);
     } finally {
       loading = false;
     }
@@ -55,29 +125,29 @@
     else loadHistory();
   }
 
-  let usbFiles: PrinterFile[] = [];
-  let usbError = '';
-
-  async function loadUsbFiles() {
-    loading = true;
-    usbError = '';
-    try {
-      await getFiles('udisk', 1, 50);
-    } catch (e) {
-      usbError = toErrorMessage(e);
-    } finally {
-      loading = false;
-    }
-  }
-
   function openPrintModal(file: PrinterFile) {
     printModalFile = file;
     printModalOpen = true;
   }
 
+  function refreshCurrentTab() {
+    if (activeTab === 'local') {
+      localPageNumber = 1;
+      localPageHistory[localPath] = 1;
+      loadFiles();
+    } else if (activeTab === 'udisk') {
+      usbPageNumber = 1;
+      usbPageHistory[usbPath] = 1;
+      loadUsbFiles();
+    } else {
+      historyPageNumber = 1;
+      loadHistory();
+    }
+  }
+
   async function handlePrint(opts: PrintOptions) {
     if (!opts.filename) return;
-    const storage = activeTab === 'udisk' ? 'udisk' : 'local';
+    const storage = activeTab === 'udisk' ? 'u-disk' : 'local';
     try {
       await startPrint(opts.filename, storage, {
         plate: opts.plate,
@@ -135,6 +205,45 @@
     }
   }
 
+  function joinPath(base: string, name: string): string {
+    if (base === '/') {
+      return `/${name}/`;
+    }
+
+    return `${base.replace(/\/+$/, '')}/${name}/`;
+  }
+
+  function parentPath(path: string): string {
+    if (path === '/') {
+      return '/';
+    }
+
+    const parts = path.split('/').filter(Boolean);
+    parts.pop();
+
+    return parts.length === 0
+      ? '/'
+      : `/${parts.join('/')}/`;
+  }
+
+  async function openFolder(file: PrinterFile) {
+    if (file.type !== 'folder') {
+      return;
+    }
+
+    if (activeTab === 'local') {
+      localPageHistory[localPath] = localPageNumber;
+      localPath = joinPath(localPath, file.filename);
+      localPageNumber = localPageHistory[localPath] || 1;
+      await loadFiles();
+    } else if (activeTab === 'udisk') {
+      usbPageHistory[usbPath] = usbPageNumber;
+      usbPath = joinPath(usbPath, file.filename);
+      usbPageNumber = localPageHistory[usbPath] || 1;
+      await loadUsbFiles();
+    }
+  }
+
   onMount(() => {
     loadFiles();
   });
@@ -179,7 +288,7 @@
           {/if}
         </button>
       {/if}
-      <button class="import-btn" on:click|stopPropagation={() => activeTab === 'local' ? loadFiles() : activeTab === 'udisk' ? loadUsbFiles() : loadHistory()} title="Refresh">
+      <button class="import-btn" on:click|stopPropagation={refreshCurrentTab} title="Refresh">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
           <path d="M11 6.5a4.5 4.5 0 11-1.3-3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
           <path d="M11 2v3h-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -207,13 +316,50 @@
     {/if}
 
     <div class="table-wrap">
+      {#if (activeTab === 'local' && localPath !== '/') || (activeTab === 'udisk' && usbPath !== '/')}
+        <div class="path-bar">
+          <button
+            class="back-btn"
+            on:click={() => {
+              if (activeTab === 'local') {
+                localPath = parentPath(localPath);
+                localPageNumber = localPageHistory[localPath] || 1;
+                loadFiles();
+              } else if (activeTab === 'udisk') {
+                usbPath = parentPath(usbPath);
+                usbPageNumber = usbPageHistory[usbPath] || 1;;
+                loadUsbFiles();
+              }
+            }}
+          >
+            ← Back
+          </button>
+
+          <span class="current-path">
+            {activeTab === 'local' ? localPath : usbPath}
+          </span>
+        </div>
+      {/if}
       {#if loading}
         <div class="empty">Loading...</div>
       {:else}
-        {@const displayFiles = activeTab === 'history' ? historyFiles : files}
-        {#if displayFiles.length === 0}
+        {@const displayFiles = activeTab === 'history' ? historyFiles : activeTab === 'udisk' ? usbFiles : localFiles}
+        {#if displayFiles == null ||displayFiles.length === 0}
           <div class="empty">
-            {activeTab === 'local' ? 'No files found. Click Refresh to load.' : activeTab === 'udisk' ? 'No USB files found. Insert USB drive and click Refresh.' : 'No print history found.'}
+            {
+              activeTab === 'history'
+                ? 'No print history found.'
+                : (
+                    (activeTab === 'local' && localPath !== '/') ||
+                    (activeTab === 'udisk' && usbPath !== '/')
+                  )
+                  ? 'Folder is empty.'
+                  : (
+                      activeTab === 'local'
+                        ? 'No files found. Click Refresh to load.'
+                        : 'No USB files found. Insert USB drive and click Refresh.'
+                    )
+            }
           </div>
         {:else}
           <table>
@@ -228,13 +374,37 @@
             </thead>
             <tbody>
               {#each displayFiles as file}
-                <tr class="file-row" on:click={() => openPrintModal(file)}>
+                <tr class="file-row" on:click={() => file.type === 'folder' ? openFolder(file) : openPrintModal(file)}>
                   <td class="col-name">
                     <div class="filename-cell">
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <rect x="1" y="1" width="10" height="10" rx="2" stroke="var(--muted)" stroke-width="1" fill="none"/>
-                        <path d="M3 4h6M3 6h6M3 8h4" stroke="var(--muted)" stroke-width="0.9" stroke-linecap="round"/>
-                      </svg>
+                      {#if file.type === 'folder'}
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                          <path
+                            d="M1.5 3.5h3l1.2 1.2h5.8v5.8h-10V3.5z"
+                            stroke="var(--accent)"
+                            stroke-width="1"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                      {:else}
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <rect
+                            x="1" y="1"
+                            width="10"
+                            height="10"
+                            rx="2"
+                            stroke="var(--muted)"
+                            stroke-width="1"
+                            fill="none"
+                          />
+                          <path
+                            d="M3 4h6M3 6h6M3 8h4"
+                            stroke="var(--muted)"
+                            stroke-width="0.9"
+                            stroke-linecap="round"
+                          />
+                        </svg>
+                      {/if}
                       <span title={file.filename ?? file.name ?? ''}>{shortName(file.filename ?? file.name ?? '')}</span>
                     </div>
                   </td>
@@ -242,16 +412,77 @@
                   <td class="col-layer mono">{file.total_layer ?? file.layer ?? file.layers ?? '--'}</td>
                   <td class="col-date">{formatDate(+(file.create_time ?? file.created ?? 0))}</td>
                   <td class="col-action">
-                    <button class="print-btn" on:click|stopPropagation={() => openPrintModal(file)} title="Print this file">
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <path d="M2.5 1.5l8 4.5-8 4.5V1.5z" fill="currentColor"/>
-                      </svg>
-                    </button>
+                    {#if file.type !== 'folder'}
+                      <button
+                        class="print-btn"
+                        on:click|stopPropagation={() => openPrintModal(file)}
+                        title="Print this file"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path
+                            d="M2.5 1.5l8 4.5-8 4.5V1.5z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      </button>
+                    {/if}
                   </td>
                 </tr>
               {/each}
             </tbody>
           </table>
+          {#if (activeTab === 'local' && localMaxSite > 1) || (activeTab === 'udisk' && usbMaxSite > 1) || (activeTab === 'history' && historyMaxSite > 1)}}
+            {@const currentPage = activeTab === 'local' ? localPageNumber : activeTab === 'udisk' ? usbPageNumber : historyPageNumber}
+            {@const maxPage = activeTab === 'local' ? localMaxSite : activeTab === 'udisk' ? usbMaxSite : historyMaxSite}
+
+            <div class="pagination">
+              <button
+                class="page-btn"
+                disabled={currentPage <= 1}
+                on:click={() => {
+                  if (currentPage <= 1) return;
+
+                  if (activeTab === 'local') {
+                    localPageNumber--;
+                    loadFiles();
+                  } else if (activeTab === 'udisk') {
+                    usbPageNumber--;
+                    loadUsbFiles();
+                  } else {
+                    historyPageNumber--;
+                    loadHistory();
+                  }
+                }}
+              >
+                ◀ Previous
+              </button>
+
+              <span class="page-info">
+                Page {currentPage} / {maxPage}
+              </span>
+
+              <button
+                class="page-btn"
+                disabled={currentPage >= maxPage}
+                on:click={() => {
+                  if (currentPage >= maxPage) return;
+
+                  if (activeTab === 'local') {
+                    localPageNumber++;
+                    loadFiles();
+                  } else if (activeTab === 'udisk') {
+                    usbPageNumber++;
+                    loadUsbFiles();
+                  } else {
+                    historyPageNumber++;
+                    loadHistory();
+                  }
+                }}
+              >
+                Next ▶
+              </button>
+            </div>
+          {/if}
         {/if}
       {/if}
     </div>
@@ -304,6 +535,7 @@
     border-radius: var(--radius-sm);
     transition: background 0.15s, color 0.15s;
   }
+
   .import-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
   .import-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .spin { animation: spin 0.9s linear infinite; transform-origin: center; }
@@ -334,6 +566,7 @@
     transition: color 0.15s, border-color 0.15s;
     cursor: pointer;
   }
+
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--text); border-bottom-color: var(--border2); }
 
@@ -349,6 +582,7 @@
     justify-content: space-between;
     gap: 10px;
   }
+
   .retry-btn {
     font-size: 11px;
     font-weight: 500;
@@ -428,4 +662,62 @@
     transition: filter 0.15s;
   }
   .print-btn:hover { filter: brightness(1.2); }
+
+  .path-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .back-btn {
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .back-btn:hover {
+    color: var(--text);
+    background: var(--border);
+  }
+
+  .current-path {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .page-btn {
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+  }
+
+  .page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .page-info {
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
 </style>

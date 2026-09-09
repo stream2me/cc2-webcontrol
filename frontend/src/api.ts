@@ -1,4 +1,5 @@
 import type { DetectionStatus, DetectionPoint } from './stores';
+import type { PrinterFile } from './stores';
 
 const BASE = '';
 
@@ -30,7 +31,6 @@ async function postJson(url: string, body: unknown): Promise<Response> {
     body: JSON.stringify(body),
   });
 }
-
 
 export async function checkSetup(): Promise<{ configured: boolean; onboarding_complete: boolean }> {
   const res = await fetch(`${BASE}/api/setup/check`);
@@ -234,9 +234,19 @@ export async function startPrint(filename: string, storage_media: string = 'loca
   if (!res.ok) await apiError(res, 'Failed to start print');
 }
 
-export async function getFiles(storage: string = 'local', pageNumber: number = 1, pageSize: number = 50): Promise<void> {
-  const res = await fetch(`${BASE}/api/printer/files?storage=${storage}&page_number=${pageNumber}&page_size=${pageSize}`);
+export interface FileListResponse {
+  error_code: number;
+  file_list: PrinterFile[];
+  offset: number;
+  total: number;
+}
+
+export async function getFiles(storage: string = 'local', path: string = '/', pageNumber: number = 1, pageSize: number = 50): Promise<FileListResponse> {
+  const res = await fetch(
+    `${BASE}/api/printer/files?storage=${encodeURIComponent(storage)}&path=${encodeURIComponent(path)}&page_number=${pageNumber}&page_size=${pageSize}`
+  );
   if (!res.ok) await apiError(res, 'Failed to get file list');
+  return res.json();
 }
 
 export async function uploadGcode(file: File): Promise<{ ok: boolean; bytes: number }> {
@@ -265,8 +275,9 @@ export interface HistoryTask {
   [key: string]: unknown;
 }
 
-export async function getHistory(): Promise<{ history: HistoryTask[] }> {
-  const res = await fetch(`${BASE}/api/printer/history`);
+export async function getHistory(pageNumber: number, pageSize: number): Promise<{ history: HistoryTask[] }> {
+  const u = `${BASE}/api/printer/history?page_number=${encodeURIComponent(pageNumber)}&page_size=${encodeURIComponent(pageSize)}`;
+  const res = await fetch(u);
   if (!res.ok) await apiError(res, 'Failed to get print history');
   return res.json();
 }

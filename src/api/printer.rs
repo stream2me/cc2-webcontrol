@@ -223,6 +223,7 @@ pub async fn set_speed_mode(
 #[derive(Deserialize)]
 pub struct FileListQuery {
     pub storage: Option<String>,
+    pub path: Option<String>,
     // native page semantics (1-based)
     pub page_number: Option<i64>,
     pub page_size: Option<i64>,
@@ -231,11 +232,25 @@ pub struct FileListQuery {
     pub limit: Option<i64>,
 }
 
+fn normalize_file_path(path: &str) -> String {
+    let parts: Vec<&str> = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    if parts.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}/", parts.join("/"))
+    }
+}
+
 pub async fn get_files(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<FileListQuery>,
 ) -> Result<Json<Value>, AppError> {
     let storage = query.storage.as_deref().unwrap_or("local");
+    let path = normalize_file_path(query.path.as_deref().unwrap_or("/"));
     let (page_number, page_size) = if let (Some(pn), Some(ps)) = (query.page_number, query.page_size) {
         (pn.max(1), ps.max(1))
     } else {
@@ -244,7 +259,7 @@ pub async fn get_files(
         let page_number = (offset / page_size) + 1;
         (page_number, page_size)
     };
-    let result = state.manager.get_file_list(storage, page_number, page_size).await?;
+    let result = state.manager.get_file_list(storage, &path, page_number, page_size).await?;
     Ok(Json(result))
 }
 
@@ -266,15 +281,51 @@ pub async fn get_file_detail(
     Ok(Json(data))
 }
 
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    pub page_number: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+
 pub async fn get_history(
     State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<HistoryQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let data = state.manager.get_print_history().await?;
-    let history = data.get("history_task_list")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    Ok(Json(serde_json::json!({ "history": history })))
+    let page_number = query.page_number.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(10).max(1);
+
+    let mut data = state.manager.get_print_history().await?;
+
+        if let Some(obj) = data.as_object_mut() {
+            let history = obj
+                .get("history_task_list")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let total = history.len();
+
+            let offset = ((page_number - 1) * page_size) as usize;
+
+            let paged_history: Vec<Value> = history
+                .into_iter()
+                .skip(offset)
+                .take(page_size as usize)
+                .collect();
+
+            obj.insert(
+                "history_task_list".to_string(),
+                serde_json::json!(paged_history),
+            );
+
+             obj.insert(
+                "total".to_string(),
+                serde_json::json!(total),
+            );
+        }
+
+    Ok(Json(data))
 }
 
 pub async fn canvas_refresh(

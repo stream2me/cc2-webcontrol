@@ -45,6 +45,7 @@ pub struct PrinterManager {
 
     // single in-flight 1044 avoids refresh stampede timeouts
     file_list_lock: tokio::sync::Mutex<()>,
+    print_history_lock: tokio::sync::Mutex<()>,
 
     running: Arc<AtomicBool>,
     lifecycle: tokio::sync::Mutex<LifecycleState>,
@@ -81,6 +82,7 @@ impl PrinterManager {
             pending_rpcs: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             rpc_id_seq: Arc::new(AtomicU64::new(10_000)),
             file_list_lock: tokio::sync::Mutex::new(()),
+            print_history_lock: tokio::sync::Mutex::new(()),
             running: Arc::new(AtomicBool::new(false)),
             lifecycle,
         }
@@ -514,25 +516,22 @@ impl PrinterManager {
         self.rpc_cmd(METHOD_SET_AMS_AUTO_REFILL, Some(serde_json::json!({ "auto_refill": enabled })), 5).await
     }
 
-    pub async fn get_file_list(&self, storage: &str, page_number: i64, page_size: i64) -> Result<serde_json::Value, PrinterError> {
-        // drop concurrent request  -  caller gets current cached list
-        let _guard = match self.file_list_lock.try_lock() {
-            Ok(g) => g,
-            Err(_) => {
-                let files = self.state.read().await.files.clone();
-                return Ok(serde_json::json!(files));
-            }
-        };
+    pub async fn get_file_list(&self, storage: &str, path: &str, page_number: i64, page_size: i64) -> Result<serde_json::Value, PrinterError> {
+        // Wait for any ongoing get_file_list request to complete
+        let _guard = self.file_list_lock.lock().await;
 
         let t0 = std::time::Instant::now();
-        info!("[cmd] get_file_list storage={storage} pageNumber={page_number} pageSize={page_size}");
+        info!("[cmd] get_file_list storage={} path={} pageNumber={} pageSize={}", storage, path, page_number, page_size);
+
+        let offset = (page_number - 1).max(0) * page_size;
 
         let result = self.rpc_call(
             METHOD_GET_FILE_LIST,
             Some(serde_json::json!({
                 "storage_media": storage,
-                "pageNumber": page_number,
-                "pageSize": page_size,
+                "dir": path,
+                "offset": offset,
+                "limit": page_size,
             })),
             15,
         ).await;
@@ -557,8 +556,13 @@ impl PrinterManager {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        info!("[cmd] get_file_list ok: {} files in {elapsed}ms", files.len());
-        Ok(serde_json::json!(files))
+
+        let total = data.get("total")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        info!("[cmd] get_file_list ok: {} files (total={}) in {elapsed}ms", files.len(), total);
+        Ok(data)
     }
 
     pub async fn get_file_info(&self, storage_media: &str, file_name: &str) -> Result<serde_json::Value, PrinterError> {
@@ -571,7 +575,11 @@ impl PrinterManager {
     }
 
     pub async fn get_print_history(&self) -> Result<serde_json::Value, PrinterError> {
+        // Wait for any ongoing get_print_history request to complete
+        let _guard = self.print_history_lock.lock().await;
+
         info!("[cmd] get_print_history");
+
         self.rpc_call(METHOD_GET_PRINT_HISTORY, None, 10).await
     }
 

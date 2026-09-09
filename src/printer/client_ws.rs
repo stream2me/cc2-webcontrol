@@ -284,7 +284,7 @@ impl MqttWsClient {
                                                         }
                                                     }
                                                     let req_files = serde_json::json!({"id": id_seq, "method": METHOD_GET_FILE_LIST,
-                                                        "params": {"storage_media": "local", "pageNumber": 1, "pageSize": 50}});
+                                                        "params": {"storage_media": "local", "dir": "/", "offset": 0, "limit": 50}});
                                                     id_seq += 1;
                                                     if let Ok(p) = serde_json::to_vec(&req_files) {
                                                         if let Err(e) = mqtt.publish(&mut write, &api_request_topic, &p).await {
