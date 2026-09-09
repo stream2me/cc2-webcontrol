@@ -23,14 +23,14 @@
   let localMaxSite = 1;
   let localPageNumber = 1;
   let localPageSize = 10;
-  let localPageHistory = {};
+  let localPageHistory: Record<string, number> = {};
 
   let usbOffset = 0;
   let usbTotal = 0;
   let usbMaxSite = 1;
   let usbPageNumber = 1;
   let usbPageSize = 10;
-  let usbPageHistory = {};
+  let usbPageHistory: Record<string, number> = {}
 
   let historyPageNumber = 1;
   let historyPageSize = 10;
@@ -170,11 +170,34 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  function formatDate(ts: number | string): string {
-    if (!ts) return '--';
-    const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
-    if (isNaN(d.getTime())) return '--';
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  function formatDate(value: number | string | null | undefined): string {
+    if (value == null || value === '')
+      {return '--';
+    }
+
+    let date: Date;
+
+    if (typeof value === 'number') {
+      date = new Date(value * 1000);
+    } else {
+      const numeric = Number(value);
+
+      if (!Number.isNaN(numeric) && value.trim() !== '') {
+        date = new Date(numeric * 1000);
+      } else {
+        date = new Date(value);
+      }
+    }
+
+    if (Number.isNaN(date.getTime())) {
+      return '--';
+    }
+
+    return date.toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
   }
 
   function shortName(name: string): string {
@@ -239,7 +262,7 @@
     } else if (activeTab === 'udisk') {
       usbPageHistory[usbPath] = usbPageNumber;
       usbPath = joinPath(usbPath, file.filename);
-      usbPageNumber = localPageHistory[usbPath] || 1;
+      usbPageNumber = usbPageHistory[usbPath] || 1;
       await loadUsbFiles();
     }
   }
@@ -327,7 +350,7 @@
                 loadFiles();
               } else if (activeTab === 'udisk') {
                 usbPath = parentPath(usbPath);
-                usbPageNumber = usbPageHistory[usbPath] || 1;;
+                usbPageNumber = usbPageHistory[usbPath] || 1;
                 loadUsbFiles();
               }
             }}
@@ -410,7 +433,7 @@
                   </td>
                   <td class="col-size mono">{formatSize(+(file.size ?? file.file_size ?? 0))}</td>
                   <td class="col-layer mono">{file.total_layer ?? file.layer ?? file.layers ?? '--'}</td>
-                  <td class="col-date">{formatDate(+(file.create_time ?? file.created ?? 0))}</td>
+                  <td class="col-date">{formatDate(file.create_time ?? file.created)}</td>
                   <td class="col-action">
                     {#if file.type !== 'folder'}
                       <button
@@ -431,7 +454,7 @@
               {/each}
             </tbody>
           </table>
-          {#if (activeTab === 'local' && localMaxSite > 1) || (activeTab === 'udisk' && usbMaxSite > 1) || (activeTab === 'history' && historyMaxSite > 1)}}
+          {#if (activeTab === 'local' && localMaxSite > 1) || (activeTab === 'udisk' && usbMaxSite > 1) || (activeTab === 'history' && historyMaxSite > 1)}
             {@const currentPage = activeTab === 'local' ? localPageNumber : activeTab === 'udisk' ? usbPageNumber : historyPageNumber}
             {@const maxPage = activeTab === 'local' ? localMaxSite : activeTab === 'udisk' ? usbMaxSite : historyMaxSite}
 
